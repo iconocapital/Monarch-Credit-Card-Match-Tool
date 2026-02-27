@@ -15,6 +15,15 @@ from dataclasses import dataclass, field
 from typing import Optional
 from enum import Enum
 
+# ─── Imports from refactored modules ───
+from card_models import CardProfile, CARD_DB
+from icono_engine import (
+    icono_perk_value, icono_score_ongoing, icono_score_year1,
+    CATEGORY_MAP, ACH_CATEGORIES,
+    NON_EXPENSE_CATEGORIES, NON_EXPENSE_PATTERNS,
+    NON_EXPENSE_MERCHANTS, NON_EXPENSE_MERCHANT_PATTERNS,
+)
+
 
 # ─────────────────────────────────────────────
 #  Data Models
@@ -37,18 +46,6 @@ class CardRecommendation:
     note: str
     annual_reward: float = 0.0
     flags: list = field(default_factory=list)
-
-
-@dataclass
-class CardProfile:
-    name: str
-    annual_fee: float
-    currency: str = "Cash Back"
-    categories: dict = field(default_factory=dict)
-    base_rate: float = 0.01  # 1% default
-    cpp_valuation: float = 1.0  # cents-per-point (1.0 = cash, 2.29 = ThankYou, 2.04 = C1 Miles, etc.)
-    annual_credits: float = 0.0  # Annual statement/travel credits that offset fee
-    signup_bonus_value: float = 0.0  # SUB dollar value for acquisition planning
 
 
 # ─────────────────────────────────────────────
@@ -81,409 +78,10 @@ def get_quarter(dt: datetime) -> int:
     return (dt.month - 1) // 3 + 1
 
 
-# ─────────────────────────────────────────────
-#  Card Database — Feb 2026 Market (Top 20)
-# ─────────────────────────────────────────────
-
-CARD_DB: dict[str, CardProfile] = {
-
-    # ═══ PREMIUM TRAVEL ═══
-    "Amex Platinum": CardProfile(
-        name="Amex Platinum",
-        annual_fee=695,
-        currency="Membership Rewards",
-        base_rate=0.01,
-        cpp_valuation=1.99,  # MR points ~1.99 cpp via transfer partners
-        annual_credits=200,  # airline fee + digital entertainment + Uber + more
-        signup_bonus_value=3000,
-        categories={
-            "airlines": 0.05,   # booked via Amex Travel
-            "hotels": 0.05,     # booked via Amex Travel
-        },
-    ),
-    "Chase Sapphire Reserve": CardProfile(
-        name="Chase Sapphire Reserve",
-        annual_fee=550,
-        currency="Ultimate Rewards",
-        base_rate=0.01,
-        cpp_valuation=2.0,  # UR points ~2.0 cpp via transfer partners
-        annual_credits=300,  # $300 travel credit
-        signup_bonus_value=1200,
-        categories={
-            "dining": 0.03,
-            "travel": 0.03,
-            "airlines": 0.03,
-            "hotels": 0.03,
-            "car_rental": 0.03,
-        },
-    ),
-    "Capital One Venture X": CardProfile(
-        name="Capital One Venture X",
-        annual_fee=395,
-        currency="Capital One Miles",
-        base_rate=0.02,
-        cpp_valuation=2.04,  # C1 miles ~2.04 cpp via transfer partners
-        annual_credits=400,  # $300 travel + $100 lifestyle
-        signup_bonus_value=1530,
-        categories={
-            "hotels": 0.10,  # booked via Capital One Travel
-            "car_rental": 0.10,  # booked via Capital One Travel
-        },
-    ),
-
-    # ═══ MID-TIER TRAVEL ═══
-    "Chase Sapphire Preferred": CardProfile(
-        name="Chase Sapphire Preferred",
-        annual_fee=95,
-        currency="Ultimate Rewards",
-        base_rate=0.01,
-        cpp_valuation=2.0,
-        annual_credits=50,  # $50 hotel credit via Chase Travel
-        signup_bonus_value=1200,
-        categories={
-            "dining": 0.03,
-            "travel": 0.02,
-            "airlines": 0.02,
-            "hotels": 0.02,
-            "streaming": 0.03,
-            "groceries": 0.03,  # online grocery only
-        },
-    ),
-    "Capital One Venture": CardProfile(
-        name="Capital One Venture",
-        annual_fee=95,
-        currency="Capital One Miles",
-        base_rate=0.02,
-        cpp_valuation=2.04,  # C1 miles ~2.04 cpp via transfer partners
-        annual_credits=100,
-        signup_bonus_value=1530,
-        categories={
-            "hotels": 0.05,  # booked via Capital One Travel
-        },
-    ),
-    "Amex Gold": CardProfile(
-        name="Amex Gold",
-        annual_fee=325,
-        currency="Membership Rewards",
-        base_rate=0.01,
-        cpp_valuation=1.99,  # MR points ~1.99 cpp via transfer partners
-        annual_credits=424,  # $120 dining + $120 Uber + $84 Dunkin + $100 hotel
-        signup_bonus_value=1990,
-        categories={
-            "dining": 0.04,
-            "groceries": 0.04,  # US supermarkets
-        },
-    ),
-    "Citi Strata Premier": CardProfile(
-        name="Citi Strata Premier",
-        annual_fee=95,
-        currency="ThankYou Points",
-        base_rate=0.01,
-        cpp_valuation=2.29,  # TY points ~2.29 cpp via transfer partners
-        annual_credits=100,
-        signup_bonus_value=1374,
-        categories={
-            "hotels": 0.03,
-            "airlines": 0.03,
-            "dining": 0.03,
-            "groceries": 0.03,
-            "gas": 0.03,
-        },
-    ),
-
-    # ═══ NO ANNUAL FEE TRAVEL ═══
-    "Capital One VentureOne": CardProfile(
-        name="Capital One VentureOne",
-        annual_fee=0,
-        currency="Capital One Miles",
-        base_rate=0.0125,  # 1.25x miles
-        cpp_valuation=2.04,  # C1 miles ~2.04 cpp via transfer partners
-    ),
-    "Bilt Mastercard": CardProfile(
-        name="Bilt Mastercard",
-        annual_fee=0,
-        currency="Bilt Points",
-        base_rate=0.01,
-        cpp_valuation=2.0,  # Bilt points ~2.0 cpp via transfer partners
-        categories={
-            "housing": 0.0125,  # unique: earn on rent (up to 1.25x at max tier)
-            "dining": 0.03,     # 3x dining
-            "travel": 0.02,     # 2x travel
-        },
-    ),
-
-    # ═══ CASH BACK — FLAT RATE ═══
-    "Chase Freedom Unlimited": CardProfile(
-        name="Chase Freedom Unlimited",
-        annual_fee=0,
-        currency="Ultimate Rewards",
-        base_rate=0.015,
-        cpp_valuation=2.0,  # UR points ~2.0 cpp via transfer partners (paired with CSR/CSP)
-        signup_bonus_value=400,
-        categories={
-            "dining": 0.03,
-            "pharmacy": 0.03,
-            "travel": 0.05,  # via Chase Travel
-        },
-    ),
-    "Citi Double Cash": CardProfile(
-        name="Citi Double Cash",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.02,  # 1% purchase + 1% payment
-        signup_bonus_value=200,
-    ),
-    "PayPal Cashback Mastercard": CardProfile(
-        name="PayPal Cashback Mastercard",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.015,  # 1.5% everywhere; can't auto-detect PayPal purchases for 3%
-        categories={
-            "paypal": 0.03,
-        },
-    ),
-
-    # ═══ CASH BACK — CATEGORY ═══
-    "Amex Blue Cash Preferred": CardProfile(
-        name="Amex Blue Cash Preferred",
-        annual_fee=95,
-        currency="Cash Back",
-        annual_credits=120,
-        signup_bonus_value=300,
-        categories={
-            "groceries": 0.06,   # up to $6k/yr at US supermarkets
-            "streaming": 0.06,
-            "gas": 0.03,
-            "transit": 0.03,
-        },
-    ),
-    "Amex Blue Cash Everyday": CardProfile(
-        name="Amex Blue Cash Everyday",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.01,
-        signup_bonus_value=200,
-        categories={
-            "groceries": 0.03,   # US supermarkets
-            "online_retail": 0.03,
-            "gas": 0.03,
-        },
-    ),
-    "Chase Freedom Flex": CardProfile(
-        name="Chase Freedom Flex",
-        annual_fee=0,
-        currency="Ultimate Rewards",
-        base_rate=0.01,
-        cpp_valuation=2.0,  # UR points ~2.0 cpp via transfer partners (paired with CSR/CSP)
-        categories={
-            "dining": 0.03,
-            "pharmacy": 0.03,
-            # rotating 5% categories handled via QUARTERLY_ROTATIONS
-        },
-    ),
-    "Capital One SavorOne": CardProfile(
-        name="Capital One SavorOne",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.01,
-        signup_bonus_value=200,
-        categories={
-            "dining": 0.03,
-            "groceries": 0.03,
-            "entertainment": 0.03,
-            "streaming": 0.03,
-        },
-    ),
-    "Citi Custom Cash": CardProfile(
-        name="Citi Custom Cash",
-        annual_fee=0,
-        currency="ThankYou Points",
-        base_rate=0.01,
-        cpp_valuation=2.29,  # TY points ~2.29 cpp via transfer partners (paired with Strata Premier)
-        signup_bonus_value=458,
-        categories={
-            # 5% on top spend category each cycle (up to $500/mo)
-            "groceries": 0.05,
-            "gas": 0.05,
-            "dining": 0.05,
-            "travel": 0.05,
-            "transit": 0.05,
-            "streaming": 0.05,
-            "pharmacy": 0.05,
-            "fitness": 0.05,
-        },
-    ),
-
-    # ═══ STORE / CO-BRAND ═══
-    "Amazon Prime Visa": CardProfile(
-        name="Amazon Prime Visa",
-        annual_fee=0,  # requires Prime membership
-        currency="Cash Back",
-        base_rate=0.01,
-        signup_bonus_value=150,
-        categories={
-            "amazon": 0.05,
-            "whole_foods": 0.05,
-            "dining": 0.02,
-            "gas": 0.02,
-            "transit": 0.02,
-        },
-    ),
-    "Apple Card": CardProfile(
-        name="Apple Card",
-        annual_fee=0,
-        currency="Cash Back (Daily Cash)",
-        base_rate=0.01,
-        categories={
-            "apple": 0.03,       # Apple purchases
-            "apple_pay": 0.02,   # all Apple Pay transactions
-        },
-    ),
-    "Chase Marriott Bonvoy Boundless": CardProfile(
-        name="Chase Marriott Bonvoy Boundless",
-        annual_fee=95,
-        currency="Marriott Bonvoy",
-        base_rate=0.02,
-        cpp_valuation=0.7,  # Marriott points ~0.7 cpp
-        annual_credits=100,  # free night cert (up to 50k pts value)
-        signup_bonus_value=525,
-        categories={
-            "hotels": 0.06,  # 6x at Marriott properties
-        },
-    ),
-
-    # ═══ BUSINESS ═══
-    "Blue Business Plus": CardProfile(
-        name="Blue Business Plus",
-        annual_fee=0,
-        currency="Membership Rewards",
-        base_rate=0.02,  # 2x on everything up to $50k/yr
-        cpp_valuation=1.99,  # MR points ~1.99 cpp via transfer partners
-        signup_bonus_value=298.5,
-    ),
-
-    # ═══ BANK OF AMERICA ═══
-    "Bank of America Atmos Summit": CardProfile(
-        name="Bank of America Atmos Summit",
-        annual_fee=195,
-        currency="Cash Back",
-        base_rate=0.02,  # 2% on everything else
-        cpp_valuation=1.0,
-        annual_credits=150,
-        signup_bonus_value=800,
-        categories={
-            "dining": 0.04,
-            "travel": 0.03,
-            "airlines": 0.03,
-            "hotels": 0.03,
-        },
-    ),
-    "Bank of America Atmos Ascend": CardProfile(
-        name="Bank of America Atmos Ascend",
-        annual_fee=95,
-        currency="Cash Back",
-        base_rate=0.015,  # 1.5% on everything else
-        cpp_valuation=1.0,
-        annual_credits=100,
-        signup_bonus_value=600,
-        categories={
-            "dining": 0.03,
-            "travel": 0.02,
-            "gas": 0.02,
-            "auto": 0.02,
-        },
-    ),
-    "Bank of America Premium Rewards": CardProfile(
-        name="Bank of America Premium Rewards",
-        annual_fee=95,
-        currency="Cash Back",
-        base_rate=0.015,  # 1.5% on everything else
-        cpp_valuation=1.0,
-        annual_credits=200,  # $100 airline incidental + $100 travel/dining
-        signup_bonus_value=600,
-        categories={
-            "dining": 0.02,
-            "travel": 0.02,
-        },
-    ),
-
-    # ═══ WELLS FARGO (ADDITIONAL) ═══
-    "Wells Fargo Autograph Journey": CardProfile(
-        name="Wells Fargo Autograph Journey",
-        annual_fee=95,
-        currency="Wells Fargo Points",
-        base_rate=0.01,
-        cpp_valuation=1.0,  # WF points ~1.0 cpp (limited transfer partners)
-        signup_bonus_value=500,
-        categories={
-            "airlines": 0.05,
-            "hotels": 0.04,
-            "car_rental": 0.03,
-            "phone": 0.03,
-            "internet": 0.03,
-            "travel": 0.03,
-        },
-    ),
-    "Wells Fargo Attune": CardProfile(
-        name="Wells Fargo Attune",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.02,
-        cpp_valuation=1.0,
-        signup_bonus_value=200,
-        categories={
-            "transit": 0.04,
-            "fitness": 0.04,
-            "self_care": 0.04,
-            "pets": 0.04,
-        },
-    ),
-
-    # ═══ US BANK ═══
-    "US Bank Cash+": CardProfile(
-        name="US Bank Cash+",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.01,
-        cpp_valuation=1.0,
-        signup_bonus_value=200,
-        categories={
-            "utilities": 0.05,
-            "internet": 0.05,
-            "phone": 0.05,
-        },
-    ),
-
-    # ═══ STATE FARM ═══
-    "State Farm Premier Cash Rewards": CardProfile(
-        name="State Farm Premier Cash Rewards",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.015,
-        cpp_valuation=1.0,
-        signup_bonus_value=0,
-        categories={
-            "insurance": 0.03,
-        },
-    ),
-
-    # ═══ ADDITIONAL CASH BACK ═══
-    "Capital One Savor": CardProfile(
-        name="Capital One Savor",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.01,
-        cpp_valuation=1.0,
-        signup_bonus_value=200,
-        categories={
-            "dining": 0.04,
-            "entertainment": 0.04,
-            "groceries": 0.03,
-            "streaming": 0.03,
-        },
-    ),
-}
-
+# CardProfile, CARD_DB, CATEGORY_MAP, ICONO functions, and NON_EXPENSE
+# filters are now imported from card_models.py and icono_engine.py.
+# QUARTERLY_ROTATIONS and ACCOUNT_NAME_PATTERNS remain here as they
+# are specific to the transaction routing engine.
 
 # ─────────────────────────────────────────────
 #  Account Name → Card DB Key Mapping
@@ -571,135 +169,7 @@ def detect_cards_from_accounts(df: pd.DataFrame, account_col: str = "Account") -
     return detected
 
 
-# ─────────────────────────────────────────────
-#  Monarch Category → Internal Tag Mapping
-# ─────────────────────────────────────────────
 
-CATEGORY_MAP: dict[str, str] = {
-    # Housing
-    "Rent": "housing", "Mortgage": "housing", "Mortgage & Rent": "housing",
-    "HOA Dues": "housing",
-
-    # Food & Dining
-    "Restaurants": "dining", "Dining": "dining", "Dining Out": "dining",
-    "Fast Food": "dining", "Coffee Shops": "dining", "Bars & Alcohol": "dining",
-    "Alcohol": "dining",
-    "Groceries": "groceries", "Grocery": "groceries",
-
-    # Utilities & Fixed Bills
-    "Gas & Electric": "utilities", "Electricity": "utilities",
-    "Water": "utilities", "Utilities": "utilities", "Sewer": "utilities",
-    "Trash": "utilities",
-    "Internet & Cable": "internet", "Internet": "internet",
-    "Cable/Internet": "internet",
-    "Phone": "phone", "Mobile Phone": "phone",
-
-    # Streaming & Subscriptions
-    "Streaming Services": "streaming", "Subscriptions": "streaming",
-    "Music": "streaming",
-
-    # Transportation
-    "Gas": "gas", "Gas & Fuel": "gas", "Fuel": "gas",
-    "Public Transit": "transit", "Ride Share": "transit",
-    "Parking": "auto", "Auto Maintenance": "auto",
-    "Service & Parts": "auto",
-    "Auto Insurance": "insurance", "Auto Payment": "auto",
-
-    # Travel
-    "Airlines": "airlines", "Flights": "airlines",
-    "Hotels": "hotels", "Lodging": "hotels",
-    "Car Rental": "car_rental", "Travel": "travel",
-
-    # Health & Wellness
-    "Fitness": "fitness", "Gym": "fitness",
-    "Health & Wellness": "self_care", "Personal Care": "self_care",
-    "Dentist": "self_care", "Medical": "self_care", "Doctor": "self_care",
-    "Health- HSA": "self_care",
-    "Pharmacy": "pharmacy",
-
-    # Pets
-    "Pets": "pets", "Pet Care": "pets", "Veterinary": "pets",
-    "Pet Food & Supplies": "pets",
-
-    # Insurance
-    "Insurance": "insurance", "Home Insurance": "insurance",
-    "Life Insurance": "insurance", "Health Insurance": "insurance",
-    "Renters Insurance": "insurance",
-
-    # Entertainment
-    "Entertainment": "entertainment", "Movies": "entertainment",
-    "Concerts": "entertainment", "Sports": "entertainment",
-    "Amusement": "entertainment",
-
-    # Online/Store-specific
-    "Amazon": "amazon", "Whole Foods": "whole_foods",
-    "Apple": "apple",
-
-    # Education
-    "Education": "general",
-
-    # Gifts
-    "Gift": "general", "Gifts": "general",
-    "Birthday Gift": "general",
-
-    # Home
-    "Home Supplies": "general", "Home Improvement": "general",
-    "New Home Build": "general",
-
-    # Business / Personal (Monarch custom categories)
-    "Business Expense": "general",
-    "Nick Business Expense": "general", "Nick Personal": "general",
-    "Matt Personal": "general",
-
-    # Everything else → will hit floor card
-    "Shopping": "general", "Electronics": "general", "Clothing": "general",
-    "Furniture": "general",
-    "Online Shopping": "online_retail",
-    "Financial Fees": "general", "Fees & Charges": "general",
-    "Charity": "general",
-    "Uncategorized": "general",
-}
-
-# Categories typically paid via ACH/bank transfer (reward leakage risk)
-ACH_CATEGORIES = {"housing", "utilities", "insurance"}
-
-# ─────────────────────────────────────────────
-#  Non-Expense Category Filter
-# ─────────────────────────────────────────────
-# These Monarch categories are NOT true card-optimizable expenses.
-# They represent money movement, income, or internal transfers.
-# Matched case-insensitively.
-NON_EXPENSE_CATEGORIES = {
-    # Transfers & payments
-    "transfer", "credit card payment", "credit card payments",
-    "transfer to savings", "internal transfer", "account transfer",
-    # Income
-    "paychecks", "paycheck", "income", "salary", "wages",
-    "interest income", "interest", "dividend", "dividends",
-    "investment income", "capital gains",
-    "reimbursement", "refund",
-    # Loan / debt movement
-    "loan payment", "loan", "student loan", "auto loan",
-    # Investment contributions (not spending)
-    "investments", "investment", "investing",
-    # Catch-all patterns for user-created transfer categories
-    # (Monarch lets users create custom categories like "Transfer to Matt")
-}
-
-# Additional partial-match patterns for custom Monarch categories
-NON_EXPENSE_PATTERNS = [
-    "transfer to ", "transfer from ",
-    "payment to ", "payment from ",
-]
-
-# Merchant-level exclusions — these merchants indicate non-card-eligible transactions
-# even when categorized as "Shopping" or other expense categories
-NON_EXPENSE_MERCHANTS = {
-    "atm withdrawal", "atm", "wire", "wire transfer",
-}
-NON_EXPENSE_MERCHANT_PATTERNS = [
-    "to ", "from ",  # "To Matt Personal Checking", "To Nick", etc.
-]
 
 
 # ─────────────────────────────────────────────
@@ -1208,23 +678,42 @@ class RewardOptimizer:
         else:
             totals["blended_rate_pct"] = 0.0
 
-        # Annual fee ROI — use effective fee (fee minus annual credits)
+        # Annual fee ROI — Icono weighted perk values instead of raw credits
         total_gross_fees = sum(
             self.cards[name].annual_fee
             for name in totals["card_breakdown"]
             if name in self.cards
         )
-        total_credits = sum(
+        total_raw_credits = sum(
             self.cards[name].annual_credits
             for name in totals["card_breakdown"]
             if name in self.cards
         )
-        totals["total_annual_fees"] = total_gross_fees
-        totals["total_annual_credits"] = total_credits
-        totals["effective_annual_fees"] = total_gross_fees - total_credits
-        totals["net_rewards_after_fees"] = round(
-            totals["total_rewards"] - (total_gross_fees - total_credits), 2
+        total_icono_perks = sum(
+            icono_perk_value(self.cards[name])
+            for name in totals["card_breakdown"]
+            if name in self.cards
         )
+        totals["total_annual_fees"] = total_gross_fees
+        totals["total_annual_credits"] = total_raw_credits
+        totals["total_icono_perks"] = round(total_icono_perks, 2)
+        totals["effective_annual_fees"] = round(total_gross_fees - total_icono_perks, 2)
+        totals["net_rewards_after_fees"] = round(
+            totals["total_rewards"] - (total_gross_fees - total_icono_perks), 2
+        )
+
+        # Per-card Icono scores
+        icono_card_scores = {}
+        for name, data in totals["card_breakdown"].items():
+            if name in self.cards:
+                profile = self.cards[name]
+                annual_rewards = data["rewards"] * 12
+                icono_card_scores[name] = {
+                    "icono_perks": round(icono_perk_value(profile), 2),
+                    "icono_ongoing": round(icono_score_ongoing(profile, annual_rewards), 2),
+                    "icono_year1": round(icono_score_year1(profile, annual_rewards), 2),
+                }
+        totals["icono_card_scores"] = icono_card_scores
 
         return results_df, totals
 
@@ -1431,17 +920,14 @@ class CardAcquisitionPlanner:
             monthly_rewards = data["rewards"]
             annual_rewards = monthly_rewards * 12
             annual_fee = profile.annual_fee
-            annual_credits = profile.annual_credits
-            effective_fee = annual_fee - annual_credits
-            net_year1 = annual_rewards - effective_fee
             spend = data["spend"]
 
             # Use signup_bonus_value from CardProfile (accurate dollar amount)
             sub_value = profile.signup_bonus_value
             sub_text = SIGNUP_BONUSES.get(card_name, "Unknown")
 
-            # Year-1 total value = SUB + ongoing rewards - effective fee
-            year1_value = sub_value + net_year1
+            # Year-1 total value using Icono weighted perk haircuts
+            year1_value = icono_score_year1(profile, annual_rewards)
 
             # Build category list this card unlocks
             cats_unlocked = []

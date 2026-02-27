@@ -13,7 +13,9 @@ from datetime import date, datetime
 from io import StringIO
 
 # ─── Import the optimizer engine ───
-from reward_optimizer import RewardOptimizer, CARD_DB
+from card_models import CARD_DB
+from icono_engine import icono_perk_value, icono_score_ongoing, icono_score_year1
+from reward_optimizer import RewardOptimizer
 from report_pdf import generate_report, generate_csv_routing
 
 # ─────────────────────────────────────────────
@@ -330,30 +332,38 @@ opportunity_cards = [card for card in breakdown if card not in owned_set]
 if opportunity_cards:
     st.markdown("---")
     st.header("🎯 Cards You're Missing — Sign-Up Bonus Opportunities")
-    st.caption("These optimized cards are not yet in your wallet. Here's what you could earn by opening them.")
+    st.caption("These optimized cards are not yet in your wallet. Icono-adjusted values apply weighted haircuts to perks (hotel 35%, Uber/dining 70%, streaming 50%, travel 100%).")
 
     bonus_rows = []
     for card_name in opportunity_cards:
         profile = CARD_DB.get(card_name)
         if profile:
             card_data = breakdown[card_name]
+            annual_rewards = card_data["rewards"] * 12
             effective_rate = (card_data["rewards"] / card_data["spend"] * 100) if card_data["spend"] > 0 else 0
+            perk_val = icono_perk_value(profile)
             bonus_rows.append({
                 "Card": card_name,
                 "Sign-Up Bonus": f"${profile.signup_bonus_value:,.0f}" if profile.signup_bonus_value > 0 else "—",
                 "Annual Fee": f"${profile.annual_fee:,.0f}" if profile.annual_fee > 0 else "$0",
-                "Annual Credits": f"${profile.annual_credits:,.0f}" if profile.annual_credits > 0 else "—",
+                "Icono Perks": perk_val,
                 "Effective Rate": f"{effective_rate:.1f}%",
                 "Monthly Rewards": card_data["rewards"],
-                "Year-1 Net Value": profile.signup_bonus_value + (card_data["rewards"] * 12) - profile.annual_fee + profile.annual_credits,
+                "Icono Ongoing": icono_score_ongoing(profile, annual_rewards),
+                "Icono Year-1": icono_score_year1(profile, annual_rewards),
             })
 
     if bonus_rows:
-        bonus_df = pd.DataFrame(bonus_rows).sort_values("Year-1 Net Value", ascending=False)
+        bonus_df = pd.DataFrame(bonus_rows).sort_values("Icono Year-1", ascending=False)
         st.dataframe(
             bonus_df.style
-                .format({"Monthly Rewards": "${:,.2f}", "Year-1 Net Value": "${:,.0f}"})
-                .map(lambda v: "background-color: #dbeafe; font-weight: 600", subset=["Year-1 Net Value"]),
+                .format({
+                    "Monthly Rewards": "${:,.2f}",
+                    "Icono Perks": "${:,.0f}",
+                    "Icono Ongoing": "${:,.0f}",
+                    "Icono Year-1": "${:,.0f}",
+                })
+                .map(lambda v: "background-color: #dbeafe; font-weight: 600", subset=["Icono Year-1"]),
             use_container_width=True,
             hide_index=True,
         )
