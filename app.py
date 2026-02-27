@@ -15,8 +15,9 @@ from io import StringIO
 # ─── Import the optimizer engine ───
 from card_models import CARD_DB
 from icono_engine import icono_perk_value, icono_score_ongoing, icono_score_year1
-from reward_optimizer import RewardOptimizer
+from reward_optimizer import RewardOptimizer, CardAcquisitionPlanner
 from report_pdf import generate_report, generate_csv_routing
+from guide_jvn import generate_guide
 
 # ─────────────────────────────────────────────
 #  Page Config
@@ -257,6 +258,33 @@ with col4:
     net_annual = summary['total_rewards'] * 12 - summary.get('effective_annual_fees', summary['total_annual_fees'])
     st.metric("Net Annual Value", f"${net_annual:,.0f}")
 
+# ─────────────────────────────────────────────
+#  JVN-Style Commentary
+# ─────────────────────────────────────────────
+
+# Build the results list that generate_guide expects from card_breakdown
+breakdown = summary["card_breakdown"]
+guide_results = []
+for card_name, data in breakdown.items():
+    profile = CARD_DB.get(card_name)
+    if profile:
+        annual_rewards = data["rewards"] * 12
+        guide_results.append({
+            "name": card_name,
+            "base_rewards_value": annual_rewards,
+            "perks_value": icono_perk_value(profile),
+            "icono_ongoing": icono_score_ongoing(profile, annual_rewards),
+            "icono_year1": icono_score_year1(profile, annual_rewards),
+            "annual_fee": profile.annual_fee,
+            "signup_bonus": profile.signup_bonus_value,
+        })
+guide_results.sort(key=lambda r: r["icono_year1"], reverse=True)
+guide = generate_guide(guide_results, total_spend=summary["total_spend"] * 12)
+
+st.markdown(f"### {guide['headline']}")
+for bullet in guide["bullets"]:
+    st.markdown(f"- {bullet}")
+
 # Opportunity flags
 has_ach = summary.get("ach_leakage_potential", 0) > 0
 has_ins = summary.get("insurance_opportunity", 0) > 0
@@ -374,6 +402,66 @@ st.bar_chart(chart_data, horizontal=True)
 
 
 # ─────────────────────────────────────────────
+#  Acquisition Roadmap (90-Day Cadence)
+# ─────────────────────────────────────────────
+
+planner = CardAcquisitionPlanner(
+    existing_cards=list(owned_set) if owned_set else None,
+)
+acquisition_steps = planner.plan(summary)
+
+if acquisition_steps:
+    st.markdown("---")
+    st.header("🗓️ Card Acquisition Roadmap")
+    st.caption("90-day application cadence — prioritized by Icono Year-1 value. Respects issuer velocity rules.")
+
+    roadmap_rows = []
+    for step in acquisition_steps:
+        roadmap_rows.append({
+            "#": step.priority,
+            "Card": step.card,
+            "Apply By": step.apply_date.strftime("%b %d, %Y"),
+            "Annual Fee": f"${step.annual_fee:,.0f}" if step.annual_fee > 0 else "$0",
+            "Sign-Up Bonus": step.signup_bonus if step.signup_bonus else "—",
+            "Monthly Spend": step.spend_captured,
+            "Monthly Rewards": step.projected_monthly_rewards,
+            "Annual Rewards": step.projected_annual_rewards,
+            "Cumulative Rate": f"{step.cumulative_blended_rate:.2f}%",
+        })
+
+    roadmap_df = pd.DataFrame(roadmap_rows)
+    st.dataframe(
+        roadmap_df.style.format({
+            "Monthly Spend": "${:,.2f}",
+            "Monthly Rewards": "${:,.2f}",
+            "Annual Rewards": "${:,.0f}",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    # Show rationale and issuer notes in an expander
+    with st.expander("📋 Detailed Rationale & Issuer Notes", expanded=False):
+        for step in acquisition_steps:
+            st.markdown(f"**#{step.priority} — {step.card}**")
+            st.markdown(f"- {step.rationale}")
+            if step.hard_inquiry_note:
+                st.markdown(f"- *Issuer note:* {step.hard_inquiry_note}")
+            st.markdown("")
+
+    # Acquisition summary
+    total_new_annual = sum(s.projected_annual_rewards for s in acquisition_steps)
+    total_new_fees = sum(s.annual_fee for s in acquisition_steps)
+    s1, s2, s3 = st.columns(3)
+    with s1:
+        st.metric("New Cards to Apply", len(acquisition_steps))
+    with s2:
+        st.metric("New Annual Rewards", f"${total_new_annual:,.0f}")
+    with s3:
+        st.metric("Net New Value", f"${total_new_annual - total_new_fees:,.0f}")
+
+
+# ─────────────────────────────────────────────
 #  Transaction Detail
 # ─────────────────────────────────────────────
 
@@ -411,7 +499,16 @@ st.header("📥 Download Report")
 report_date = datetime.now().strftime("%Y-%m-%d")
 dl1, dl2 = st.columns(2)
 with dl1:
-    pdf_bytes = generate_report(results, summary, plan=[])
+    plan_lines = []
+    if acquisition_steps:
+        for step in acquisition_steps:
+            plan_lines.append(
+                f"{step.card} — Apply by {step.apply_date.strftime('%b %d, %Y')} | "
+                f"Fee: ${step.annual_fee:,.0f} | "
+                f"Annual Rewards: ${step.projected_annual_rewards:,.0f} | "
+                f"{step.signup_bonus}"
+            )
+    pdf_bytes = generate_report(results, summary, plan=plan_lines)
     st.download_button(
         label="📥 Download Full Report (PDF)",
         data=pdf_bytes,
