@@ -88,14 +88,15 @@ def _build_bullets(results: list[dict], total_spend: float) -> list[str]:
                 f"than it's earning. That card is not pulling its weight."
             )
 
-    # 3. Rent/Bilt callout
-    bilt_results = [r for r in results if r["name"] == "Bilt Mastercard"]
-    if bilt_results and bilt_results[0]["base_rewards_value"] > 0:
-        bilt = bilt_results[0]
-        bullets.append(
-            f"Bilt is earning ${bilt['base_rewards_value']:,.0f} on rent — "
-            f"if you're still paying via ACH, we are NOT doing that anymore."
-        )
+    # 3. Rent/Bilt callout (works with any Bilt 2.0 card)
+    bilt_results = [r for r in results if r["name"].startswith("Bilt")]
+    if bilt_results:
+        best_bilt = max(bilt_results, key=lambda r: r["base_rewards_value"])
+        if best_bilt["base_rewards_value"] > 0:
+            bullets.append(
+                f"{best_bilt['name']} is earning ${best_bilt['base_rewards_value']:,.0f} on rent — "
+                f"if you're still paying via ACH, we are NOT doing that anymore."
+            )
 
     # 4. Travel energy
     travel_cards = [r for r in results if r["name"] in (

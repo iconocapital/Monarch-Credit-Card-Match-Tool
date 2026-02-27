@@ -44,7 +44,7 @@ CPP_FLOOR_MAP: dict[str, float] = {
     "Membership Rewards": 0.9,
     "ThankYou Points": 1.5,
     "Capital One Miles": 1.0,
-    "Bilt Points": 1.5,
+    "Bilt Points": 2.2,
     "Wells Fargo Points": 1.0,
     "Marriott Bonvoy": 0.7,
     "Cash Back": 1.0,
@@ -224,16 +224,48 @@ CARD_DB: dict[str, CardProfile] = {
         base_rate=0.0125,
         cpp_valuation=2.04,
     ),
-    "Bilt Mastercard": CardProfile(
-        name="Bilt Mastercard",
+
+    # ═══ BILT 2.0 LINEUP (Feb 2026) ═══
+    # Bilt 2.0 dual-currency: Bilt Points (transferable to Atmos/Hyatt) + Bilt Cash.
+    # Housing multiplier: up to 1.25x based on everyday spend ratio (tiered).
+    # Bilt Cash: 4% on non-housing, redeemable at $30 per 1,000 Bilt Points on housing.
+    # CPP: 2.2 (Atmos Rewards / World of Hyatt trifecta valuation).
+    "Bilt Blue": CardProfile(
+        name="Bilt Blue",
         annual_fee=0,
         currency="Bilt Points",
         base_rate=0.01,
-        cpp_valuation=2.0,
+        cpp_valuation=2.2,
         categories={
-            "housing": 0.0125,
+            "housing": 0.0125,  # max tiered housing rate
+        },
+    ),
+    "Bilt Obsidian": CardProfile(
+        name="Bilt Obsidian",
+        annual_fee=95,
+        currency="Bilt Points",
+        base_rate=0.01,
+        cpp_valuation=2.2,
+        annual_credits=100,
+        signup_bonus_value=0,
+        hotel_credit=100,
+        categories={
+            "housing": 0.0125,  # max tiered housing rate
             "dining": 0.03,
-            "travel": 0.02,
+            "groceries": 0.03,
+        },
+    ),
+    "Bilt Palladium": CardProfile(
+        name="Bilt Palladium",
+        annual_fee=495,
+        currency="Bilt Points",
+        base_rate=0.02,  # 2x on everything
+        cpp_valuation=2.2,
+        annual_credits=400,
+        signup_bonus_value=0,
+        hotel_credit=400,
+        categories={
+            "housing": 0.0125,  # max tiered housing rate
         },
     ),
 
@@ -338,7 +370,7 @@ CARD_DB: dict[str, CardProfile] = {
         },
     ),
 
-    # ═══ STORE / CO-BRAND ═══
+    # ═══ STORE / BRAND-SPECIFIC ═══
     "Amazon Prime Visa": CardProfile(
         name="Amazon Prime Visa",
         annual_fee=0,
@@ -363,6 +395,17 @@ CARD_DB: dict[str, CardProfile] = {
             "apple_pay": 0.02,
         },
     ),
+    "Target Circle Card": CardProfile(
+        name="Target Circle Card",
+        annual_fee=0,
+        currency="Cash Back",
+        base_rate=0.01,
+        categories={
+            "target": 0.05,
+        },
+    ),
+
+    # ═══ CO-BRAND TRAVEL ═══
     "Chase Marriott Bonvoy Boundless": CardProfile(
         name="Chase Marriott Bonvoy Boundless",
         annual_fee=95,
@@ -375,16 +418,6 @@ CARD_DB: dict[str, CardProfile] = {
         categories={
             "hotels": 0.06,
         },
-    ),
-
-    # ═══ BUSINESS ═══
-    "Blue Business Plus": CardProfile(
-        name="Blue Business Plus",
-        annual_fee=0,
-        currency="Membership Rewards",
-        base_rate=0.02,
-        cpp_valuation=1.99,
-        signup_bonus_value=298.5,
     ),
 
     # ═══ BANK OF AMERICA ═══
@@ -480,19 +513,6 @@ CARD_DB: dict[str, CardProfile] = {
             "utilities": 0.05,
             "internet": 0.05,
             "phone": 0.05,
-        },
-    ),
-
-    # ═══ STATE FARM ═══
-    "State Farm Premier Cash Rewards": CardProfile(
-        name="State Farm Premier Cash Rewards",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.015,
-        cpp_valuation=1.0,
-        signup_bonus_value=0,
-        categories={
-            "insurance": 0.03,
         },
     ),
 

@@ -46,8 +46,8 @@ class TestGetEffectiveCpp:
         assert get_effective_cpp(card, mode="floor") == 1.5
 
     def test_floor_mode_bilt(self):
-        card = CARD_DB["Bilt Mastercard"]
-        assert get_effective_cpp(card, mode="floor") == 1.5
+        card = CARD_DB["Bilt Blue"]
+        assert get_effective_cpp(card, mode="floor") == 2.2
 
     def test_default_mode_is_awardwallet(self):
         card = CARD_DB["Amex Gold"]
@@ -397,9 +397,9 @@ class TestGenerateGuide:
         assert any("Bad" in b for b in guide["bullets"])
 
     def test_bilt_callout(self):
-        """Bilt Mastercard should get a rent callout when it has rewards."""
+        """Any Bilt card should get a rent callout when it has rewards."""
         results = [
-            _make_result(name="Bilt Mastercard", base_rewards=600.0, year1=1000.0),
+            _make_result(name="Bilt Blue", base_rewards=600.0, year1=1000.0),
         ]
         guide = generate_guide(results)
         assert any("Bilt" in b and "rent" in b for b in guide["bullets"])
@@ -425,7 +425,7 @@ class TestGenerateGuide:
         """Should never return more than 4 bullets."""
         results = [
             _make_result(name="Chase Sapphire Reserve", perks=300.0, ongoing=-50.0, year1=2000.0),
-            _make_result(name="Bilt Mastercard", base_rewards=600.0, ongoing=-100.0, year1=500.0, perks=0.0),
+            _make_result(name="Bilt Blue", base_rewards=600.0, ongoing=-100.0, year1=500.0, perks=0.0),
             _make_result(name="Weak", base_rewards=50.0, ongoing=10.0, year1=100.0, perks=0.0),
         ]
         guide = generate_guide(results)
@@ -464,3 +464,105 @@ class TestAnnualCreditsDeprecation:
             + plat.dining_credit + plat.streaming_credit + plat.other_credit
         )
         assert granular_sum == plat.annual_credits
+
+
+# ─────────────────────────────────────────────
+#  Bilt 2.0 card lineup tests
+# ─────────────────────────────────────────────
+
+class TestBilt20Lineup:
+    def test_bilt_blue_exists(self):
+        assert "Bilt Blue" in CARD_DB
+        blue = CARD_DB["Bilt Blue"]
+        assert blue.annual_fee == 0
+        assert blue.base_rate == 0.01
+        assert blue.cpp_valuation == 2.2
+
+    def test_bilt_obsidian_exists(self):
+        assert "Bilt Obsidian" in CARD_DB
+        obs = CARD_DB["Bilt Obsidian"]
+        assert obs.annual_fee == 95
+        assert obs.categories.get("dining") == 0.03
+        assert obs.categories.get("groceries") == 0.03
+        assert obs.hotel_credit == 100
+
+    def test_bilt_palladium_exists(self):
+        assert "Bilt Palladium" in CARD_DB
+        pal = CARD_DB["Bilt Palladium"]
+        assert pal.annual_fee == 495
+        assert pal.base_rate == 0.02  # 2x on everything
+        assert pal.hotel_credit == 400
+
+    def test_bilt_mastercard_removed(self):
+        assert "Bilt Mastercard" not in CARD_DB
+
+    def test_bilt_cpp_is_2_2(self):
+        """All Bilt cards should use 2.2 cpp (Atmos/Hyatt trifecta)."""
+        for name in ("Bilt Blue", "Bilt Obsidian", "Bilt Palladium"):
+            assert CARD_DB[name].cpp_valuation == 2.2
+
+    def test_bilt_housing_rate_in_categories(self):
+        """All Bilt cards should have housing rate in categories."""
+        for name in ("Bilt Blue", "Bilt Obsidian", "Bilt Palladium"):
+            assert CARD_DB[name].categories.get("housing") == 0.0125
+
+
+# ─────────────────────────────────────────────
+#  Bilt 2.0 tiered housing logic tests
+# ─────────────────────────────────────────────
+
+from reward_optimizer import RewardOptimizer
+
+
+class TestBilt20Housing:
+    def test_max_tier_100pct(self):
+        """Spend >= 100% housing → 1.25x."""
+        rate = RewardOptimizer.calc_bilt_housing_rate(3000, 3000)
+        assert rate == 0.0125
+
+    def test_tier_75pct(self):
+        """Spend >= 75% but < 100% housing → 1.0x."""
+        rate = RewardOptimizer.calc_bilt_housing_rate(3000, 2250)
+        assert rate == 0.01
+
+    def test_tier_50pct(self):
+        """Spend >= 50% but < 75% housing → 0.75x."""
+        rate = RewardOptimizer.calc_bilt_housing_rate(3000, 1500)
+        assert rate == 0.0075
+
+    def test_tier_below_50pct(self):
+        """Spend < 50% housing → 0.5x."""
+        rate = RewardOptimizer.calc_bilt_housing_rate(3000, 1000)
+        assert rate == 0.005
+
+    def test_zero_housing(self):
+        """Zero housing payment → default 1% rate."""
+        rate = RewardOptimizer.calc_bilt_housing_rate(0, 1000)
+        assert rate == 0.01
+
+    def test_bilt_cash_path(self):
+        """Bilt Cash path: 4% Bilt Cash → redeem for housing points."""
+        # $3000 everyday spend × 4% = $120 Bilt Cash
+        # $120 / $30 × 1000 = 4,000 points
+        # Max housing points at 1x: $3000 × 0.01 = 30 (in rate terms)
+        rate = RewardOptimizer.calc_bilt_cash_housing_value(3000, 3000)
+        # 4000 points vs 30 point cap → capped at 30 → rate = 30/3000 = 0.01
+        assert rate == pytest.approx(0.01, abs=0.001)
+
+
+# ─────────────────────────────────────────────
+#  Removed cards tests
+# ─────────────────────────────────────────────
+
+class TestRemovedCards:
+    def test_blue_business_plus_removed(self):
+        assert "Blue Business Plus" not in CARD_DB
+
+    def test_state_farm_removed(self):
+        assert "State Farm Premier Cash Rewards" not in CARD_DB
+
+    def test_target_circle_added(self):
+        assert "Target Circle Card" in CARD_DB
+        target = CARD_DB["Target Circle Card"]
+        assert target.categories.get("target") == 0.05
+        assert target.annual_fee == 0

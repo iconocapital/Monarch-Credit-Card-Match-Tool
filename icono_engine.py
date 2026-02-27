@@ -79,7 +79,7 @@ CATEGORY_MAP: dict[str, str] = {
 
     # Online/Store-specific
     "Amazon": "amazon", "Whole Foods": "whole_foods",
-    "Apple": "apple",
+    "Apple": "apple", "Target": "target",
 
     # Education
     "Education": "general",

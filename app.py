@@ -97,14 +97,18 @@ with st.sidebar:
         ],
         "🆓 No-Fee Travel": [
             ("Capital One VentureOne", "$0 · 1.25x miles"),
-            ("Bilt Mastercard", "$0 · Earn on rent, 3x dining, 2x travel"),
         ],
-        "💵 Cash Back – Flat Rate": [
+        "🏠 Bilt 2.0 (Housing + Points)": [
+            ("Bilt Blue", "$0 · 1x everywhere, earn on rent, 4% Bilt Cash"),
+            ("Bilt Obsidian", "$95/yr · 3x dining/groceries, $100 hotel credit"),
+            ("Bilt Palladium", "$495/yr · 2x everywhere, $400 hotel credit, Priority Pass"),
+        ],
+        "💵 Cash Back - Flat Rate": [
             ("Chase Freedom Unlimited", "$0 · 1.5x UR + 3x dining"),
             ("Citi Double Cash", "$0 · 2% everything"),
             ("PayPal Cashback Mastercard", "$0 · 3% PayPal, 1.5% other"),
         ],
-        "🏷️ Cash Back – Category": [
+        "🏷️ Cash Back - Category": [
             ("Amex Blue Cash Preferred", "$95/yr · 6% groceries/streaming · $120 credits"),
             ("Amex Blue Cash Everyday", "$0 · 3% groceries/gas/online"),
             ("Chase Freedom Flex", "$0 · 5% rotating, 3% dining"),
@@ -115,14 +119,13 @@ with st.sidebar:
             ("Wells Fargo Attune", "$0 · 4% transit/fitness/pets, 2% everything"),
             ("US Bank Cash+", "$0 · 5% two chosen categories (utilities, internet, etc.)"),
         ],
-        "💼 Business": [
-            ("Blue Business Plus", "$0 · 2x MR on everything"),
-        ],
-        "🛒 Store / Co-Brand": [
+        "🛍️ Store / Brand-Specific": [
             ("Amazon Prime Visa", "$0 · 5% Amazon/Whole Foods"),
             ("Apple Card", "$0 · 3% Apple, 2% Apple Pay"),
+            ("Target Circle Card", "$0 · 5% at Target"),
+        ],
+        "🏨 Co-Brand Travel": [
             ("Chase Marriott Bonvoy Boundless", "$95/yr · 6x Marriott · $100 credits"),
-            ("State Farm Premier Cash Rewards", "$0 · 3% insurance, 1.5% everything"),
         ],
     }
 
@@ -134,14 +137,14 @@ with st.sidebar:
                 existing_cards.append(card_name)
 
     st.markdown("---")
-    st.subheader("Bilt Housing Details")
+    st.subheader("Bilt 2.0 Housing Details")
     monthly_housing = st.number_input(
         "Monthly housing payment ($)", min_value=0, value=3000, step=100,
-        help="Rent, mortgage, HOA combined."
+        help="Rent or mortgage payment routed through Bilt."
     )
     monthly_nonhousing_bilt = st.number_input(
-        "Monthly non-housing spend on Bilt ($)", min_value=0, value=3500, step=100,
-        help="All non-housing transactions you put on your Bilt card."
+        "Monthly everyday spend ($)", min_value=0, value=3500, step=100,
+        help="Non-housing transactions (dining, groceries, shopping, etc.) — determines your Bilt 2.0 tier."
     )
 
     st.markdown("---")
