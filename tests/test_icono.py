@@ -236,3 +236,129 @@ class TestAnalyzeCards:
         assert "icono_ongoing" in r
         assert "icono_year1" in r
         assert "annual_fee" in r
+
+
+# ─────────────────────────────────────────────
+#  generate_guide tests
+# ─────────────────────────────────────────────
+
+from guide_jvn import generate_guide
+
+
+def _make_result(name="TestCard", base_rewards=500.0, perks=250.0, ongoing=600.0,
+                 year1=1800.0, fee=95):
+    """Helper to build a fake card result dict."""
+    return {
+        "name": name,
+        "base_rewards_value": base_rewards,
+        "perks_value": perks,
+        "icono_ongoing": ongoing,
+        "icono_year1": year1,
+        "annual_fee": fee,
+    }
+
+
+class TestGenerateGuide:
+    def test_empty_results(self):
+        """No results should prompt the user to upload."""
+        guide = generate_guide([])
+        assert "headline" in guide
+        assert "bullets" in guide
+        assert "tone" in guide
+        assert guide["tone"] == "sassy-supportive"
+        assert "transactions" in guide["headline"].lower()
+
+    def test_returns_required_keys(self):
+        """Guide dict must have headline, bullets, tone."""
+        results = [_make_result()]
+        guide = generate_guide(results)
+        assert isinstance(guide["headline"], str)
+        assert isinstance(guide["bullets"], list)
+        assert guide["tone"] == "sassy-supportive"
+
+    def test_high_year1_headline(self):
+        """Year-1 > $3000 should trigger the SERVING headline."""
+        results = [_make_result(name="Amex Platinum", year1=3500.0)]
+        guide = generate_guide(results)
+        assert "SERVING" in guide["headline"]
+        assert "3,500" in guide["headline"]
+
+    def test_medium_year1_headline(self):
+        """Year-1 between $1500-$3000 should trigger main character headline."""
+        results = [_make_result(name="CSR", year1=2000.0)]
+        guide = generate_guide(results)
+        assert "main character" in guide["headline"]
+
+    def test_neck_and_neck_headline(self):
+        """Two cards within $100 should trigger neck-and-neck."""
+        results = [
+            _make_result(name="CardA", year1=1200.0),
+            _make_result(name="CardB", year1=1150.0),
+        ]
+        guide = generate_guide(results)
+        assert "neck-and-neck" in guide["headline"]
+
+    def test_runaway_headline(self):
+        """Big gap > $500 should trigger the runaway headline."""
+        results = [
+            _make_result(name="Winner", year1=1400.0),
+            _make_result(name="Loser", year1=800.0),
+        ]
+        guide = generate_guide(results)
+        assert "running away" in guide["headline"]
+
+    def test_perks_bullet(self):
+        """High perks (>$200) should produce a perks bullet."""
+        results = [_make_result(perks=350.0)]
+        guide = generate_guide(results)
+        assert any("perk" in b.lower() for b in guide["bullets"])
+
+    def test_negative_ongoing_roast(self):
+        """A card with negative ongoing should get called out."""
+        results = [
+            _make_result(name="Good", ongoing=500.0, year1=1500.0),
+            _make_result(name="Bad", ongoing=-200.0, year1=300.0),
+        ]
+        guide = generate_guide(results)
+        assert any("Bad" in b for b in guide["bullets"])
+
+    def test_bilt_callout(self):
+        """Bilt Mastercard should get a rent callout when it has rewards."""
+        results = [
+            _make_result(name="Bilt Mastercard", base_rewards=600.0, year1=1000.0),
+        ]
+        guide = generate_guide(results)
+        assert any("Bilt" in b and "rent" in b for b in guide["bullets"])
+
+    def test_travel_card_bullet(self):
+        """A travel card with high year-1 should get a travel bullet."""
+        results = [
+            _make_result(name="Chase Sapphire Reserve", year1=2000.0),
+        ]
+        guide = generate_guide(results)
+        assert any("travel" in b.lower() or "wanderlust" in b.lower() for b in guide["bullets"])
+
+    def test_floor_card_roast(self):
+        """Low-earning card (<$100) should get roasted."""
+        results = [
+            _make_result(name="Good", base_rewards=500.0, year1=1500.0),
+            _make_result(name="Weak", base_rewards=50.0, year1=200.0),
+        ]
+        guide = generate_guide(results)
+        assert any("Weak" in b for b in guide["bullets"])
+
+    def test_bullets_capped_at_four(self):
+        """Should never return more than 4 bullets."""
+        results = [
+            _make_result(name="Chase Sapphire Reserve", perks=300.0, ongoing=-50.0, year1=2000.0),
+            _make_result(name="Bilt Mastercard", base_rewards=600.0, ongoing=-100.0, year1=500.0, perks=0.0),
+            _make_result(name="Weak", base_rewards=50.0, ongoing=10.0, year1=100.0, perks=0.0),
+        ]
+        guide = generate_guide(results)
+        assert len(guide["bullets"]) <= 4
+
+    def test_fallback_bullet(self):
+        """When no special conditions trigger, should still get encouragement."""
+        results = [_make_result(perks=0.0, base_rewards=200.0)]
+        guide = generate_guide(results)
+        assert len(guide["bullets"]) >= 1
