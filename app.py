@@ -292,9 +292,12 @@ st.markdown("---")
 st.header("🃏 Card-by-Card Routing")
 
 breakdown = summary["card_breakdown"]
+owned_set = set(summary.get("owned_cards", []))
+
 breakdown_df = pd.DataFrame([
     {
         "Card": card,
+        "Status": "✅ Owned" if card in owned_set else "⭐ Opportunity",
         "Monthly Spend": data["spend"],
         "Monthly Rewards": data["rewards"],
         "Effective Rate": f"{(data['rewards'] / data['spend'] * 100):.1f}%" if data["spend"] > 0 else "0%",
@@ -303,8 +306,14 @@ breakdown_df = pd.DataFrame([
     for card, data in sorted(breakdown.items(), key=lambda x: x[1]["rewards"], reverse=True)
 ])
 
+def _color_card_rows(row):
+    """Neutral gray for owned cards, bright highlight for opportunity cards."""
+    if row["Status"] == "⭐ Opportunity":
+        return ["background-color: #dbeafe; color: #1e3a5f; font-weight: 600"] * len(row)
+    return ["background-color: #f8fafc; color: #64748b"] * len(row)
+
 st.dataframe(
-    breakdown_df.style.format({
+    breakdown_df.style.apply(_color_card_rows, axis=1).format({
         "Monthly Spend": "${:,.2f}",
         "Monthly Rewards": "${:,.2f}",
         "Annual Rewards": "${:,.0f}",
@@ -312,6 +321,42 @@ st.dataframe(
     use_container_width=True,
     hide_index=True,
 )
+
+# ─────────────────────────────────────────────
+#  Opportunity Cards — Sign-Up Bonus Highlights
+# ─────────────────────────────────────────────
+
+opportunity_cards = [card for card in breakdown if card not in owned_set]
+if opportunity_cards:
+    st.markdown("---")
+    st.header("🎯 Cards You're Missing — Sign-Up Bonus Opportunities")
+    st.caption("These optimized cards are not yet in your wallet. Here's what you could earn by opening them.")
+
+    bonus_rows = []
+    for card_name in opportunity_cards:
+        profile = CARD_DB.get(card_name)
+        if profile:
+            card_data = breakdown[card_name]
+            effective_rate = (card_data["rewards"] / card_data["spend"] * 100) if card_data["spend"] > 0 else 0
+            bonus_rows.append({
+                "Card": card_name,
+                "Sign-Up Bonus": f"${profile.signup_bonus_value:,.0f}" if profile.signup_bonus_value > 0 else "—",
+                "Annual Fee": f"${profile.annual_fee:,.0f}" if profile.annual_fee > 0 else "$0",
+                "Annual Credits": f"${profile.annual_credits:,.0f}" if profile.annual_credits > 0 else "—",
+                "Effective Rate": f"{effective_rate:.1f}%",
+                "Monthly Rewards": card_data["rewards"],
+                "Year-1 Net Value": profile.signup_bonus_value + (card_data["rewards"] * 12) - profile.annual_fee + profile.annual_credits,
+            })
+
+    if bonus_rows:
+        bonus_df = pd.DataFrame(bonus_rows).sort_values("Year-1 Net Value", ascending=False)
+        st.dataframe(
+            bonus_df.style
+                .format({"Monthly Rewards": "${:,.2f}", "Year-1 Net Value": "${:,.0f}"})
+                .map(lambda v: "background-color: #dbeafe; font-weight: 600", subset=["Year-1 Net Value"]),
+            use_container_width=True,
+            hide_index=True,
+        )
 
 # Bar chart of rewards by card
 chart_data = breakdown_df.set_index("Card")[["Monthly Rewards"]].sort_values("Monthly Rewards", ascending=True)
