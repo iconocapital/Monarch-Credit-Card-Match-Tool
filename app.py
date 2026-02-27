@@ -13,7 +13,9 @@ from datetime import date, datetime
 from io import StringIO
 
 # ─── Import the optimizer engine ───
-from reward_optimizer import RewardOptimizer, CARD_DB, icono_perk_value, icono_score_ongoing, icono_score_year1
+from card_models import CARD_DB
+from icono_engine import icono_perk_value, icono_score_ongoing, icono_score_year1
+from reward_optimizer import RewardOptimizer
 from report_pdf import generate_report, generate_csv_routing
 
 # ─────────────────────────────────────────────
