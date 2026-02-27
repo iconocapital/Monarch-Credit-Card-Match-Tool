@@ -1,5 +1,4 @@
 # report_pdf.py
-from fpdf import FPDF
 from io import BytesIO
 import pandas as pd
 from datetime import datetime
@@ -36,6 +35,7 @@ def generate_report(
     icono_scores : optional list of card dicts (from ``analyze_cards``)
                    sorted by ``icono_year1`` descending.
     """
+    from fpdf import FPDF
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()

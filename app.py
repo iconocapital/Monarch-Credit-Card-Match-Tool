@@ -16,7 +16,7 @@ from io import StringIO
 from card_models import CARD_DB
 from icono_engine import icono_perk_value, icono_score_ongoing, icono_score_year1
 from reward_optimizer import RewardOptimizer, CardAcquisitionPlanner
-from report_pdf import generate_report, generate_csv_routing
+from report_pdf import generate_csv_routing
 from guide_jvn import generate_guide
 
 # ─────────────────────────────────────────────
@@ -31,30 +31,156 @@ st.set_page_config(
 )
 
 # ─────────────────────────────────────────────
-#  Custom Styling
+#  Custom Styling — Monarch Palette
+#  #1C5355 deep teal   — headings, primary text
+#  #F7EEDB warm cream   — sidebar, secondary bg
+#  #DAD8D2 stone gray   — borders, dividers
+#  #4EB8BC bright teal  — accents, CTAs, highlights
+#  #FFFeFB near-white   — main canvas
+#  #F4F2EA off-white     — metric cards, alternating rows
 # ─────────────────────────────────────────────
 
 st.markdown("""
 <style>
-    /* Clean typography */
-    .main h1 { font-size: 2rem; font-weight: 700; margin-bottom: 0.25rem; }
-    .main h2 { font-size: 1.4rem; font-weight: 600; color: #334155; }
-    .main h3 { font-size: 1.1rem; font-weight: 600; color: #475569; }
+    /* ── Typography ── */
+    .main h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        color: #1C5355;
+        margin-bottom: 0.25rem;
+    }
+    .main h2 {
+        font-size: 1.4rem;
+        font-weight: 600;
+        color: #1C5355;
+    }
+    .main h3 {
+        font-size: 1.1rem;
+        font-weight: 600;
+        color: #1C5355;
+    }
 
-    /* Metric cards */
+    /* ── Metric cards ── */
     [data-testid="stMetric"] {
-        background: #f8fafc;
-        border: 1px solid #e2e8f0;
+        background: #F4F2EA;
+        border: 1px solid #DAD8D2;
         border-radius: 12px;
         padding: 16px;
     }
-    [data-testid="stMetricLabel"] { font-size: 0.8rem; color: #64748b; }
-    [data-testid="stMetricValue"] { font-size: 1.5rem; font-weight: 700; color: #0f172a; }
+    [data-testid="stMetricLabel"] {
+        font-size: 0.8rem;
+        color: #4EB8BC;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.03em;
+    }
+    [data-testid="stMetricValue"] {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: #1C5355;
+    }
+    [data-testid="stMetricDelta"] {
+        color: #4EB8BC;
+    }
 
-    /* Footer */
-    .footer { text-align: center; color: #94a3b8; font-size: 0.8rem; margin-top: 3rem; padding: 1rem; border-top: 1px solid #e2e8f0; }
+    /* ── Sidebar ── */
+    [data-testid="stSidebar"] {
+        background-color: #F7EEDB;
+        border-right: 2px solid #DAD8D2;
+    }
+    [data-testid="stSidebar"] h1,
+    [data-testid="stSidebar"] h2,
+    [data-testid="stSidebar"] h3 {
+        color: #1C5355;
+    }
+    [data-testid="stSidebar"] .stMarkdown p {
+        color: #1C5355;
+    }
 
-    /* Hide Streamlit branding */
+    /* ── Buttons & download ── */
+    .stDownloadButton > button,
+    .stButton > button {
+        background-color: #4EB8BC;
+        color: #FFFeFB;
+        border: none;
+        border-radius: 8px;
+        font-weight: 600;
+        transition: background-color 0.2s ease;
+    }
+    .stDownloadButton > button:hover,
+    .stButton > button:hover {
+        background-color: #1C5355;
+        color: #FFFeFB;
+    }
+
+    /* ── Expander headers ── */
+    [data-testid="stExpander"] summary {
+        color: #1C5355;
+        font-weight: 600;
+    }
+    [data-testid="stExpander"] {
+        border: 1px solid #DAD8D2;
+        border-radius: 8px;
+    }
+
+    /* ── Info / Warning / Success boxes ── */
+    [data-testid="stAlert"] {
+        border-radius: 8px;
+    }
+    div[data-testid="stAlert"][data-baseweb="notification"]:has(.st-emotion-cache-info) {
+        border-left-color: #4EB8BC;
+    }
+
+    /* ── Horizontal rules ── */
+    .main hr {
+        border-color: #DAD8D2;
+    }
+
+    /* ── Data tables ── */
+    [data-testid="stDataFrame"] th {
+        background-color: #1C5355 !important;
+        color: #FFFeFB !important;
+    }
+
+    /* ── Bar chart accent ── */
+    .vega-embed .mark-rect { fill: #4EB8BC; }
+
+    /* ── Checkbox accent ── */
+    [data-testid="stCheckbox"] label span[data-testid="stCheckboxActive"] {
+        background-color: #4EB8BC;
+    }
+
+    /* ── File uploader ── */
+    [data-testid="stFileUploader"] {
+        border: 2px dashed #DAD8D2;
+        border-radius: 12px;
+        padding: 1rem;
+    }
+    [data-testid="stFileUploader"]:hover {
+        border-color: #4EB8BC;
+    }
+
+    /* ── Footer ── */
+    .footer {
+        text-align: center;
+        color: #1C5355;
+        font-size: 0.8rem;
+        margin-top: 3rem;
+        padding: 1rem;
+        border-top: 2px solid #DAD8D2;
+        background-color: #F4F2EA;
+        border-radius: 0 0 8px 8px;
+    }
+    .footer a {
+        color: #4EB8BC;
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .footer a:hover {
+        color: #1C5355;
+    }
+
+    /* ── Streamlit branding ── */
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
 </style>
@@ -149,6 +275,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.caption("Built by [Icono](https://iconoclasticcapital.com) — Fee-Only Wealth Management")
+    st.markdown('<hr style="border-color: #DAD8D2;">', unsafe_allow_html=True)
 
 
 # ─────────────────────────────────────────────
@@ -340,10 +467,10 @@ breakdown_df = pd.DataFrame([
 ])
 
 def _color_card_rows(row):
-    """Neutral gray for owned cards, bright highlight for opportunity cards."""
+    """Neutral off-white for owned cards, bright teal highlight for opportunity cards."""
     if row["Status"] == "⭐ Opportunity":
-        return ["background-color: #dbeafe; color: #1e3a5f; font-weight: 600"] * len(row)
-    return ["background-color: #f8fafc; color: #64748b"] * len(row)
+        return ["background-color: #d6f0f1; color: #1C5355; font-weight: 600"] * len(row)
+    return ["background-color: #F4F2EA; color: #1C5355"] * len(row)
 
 st.dataframe(
     breakdown_df.style.apply(_color_card_rows, axis=1).format({
@@ -394,7 +521,7 @@ if opportunity_cards:
                     "Icono Ongoing": "${:,.0f}",
                     "Icono Year-1": "${:,.0f}",
                 })
-                .map(lambda v: "background-color: #dbeafe; font-weight: 600", subset=["Icono Year-1"]),
+                .map(lambda v: "background-color: #d6f0f1; color: #1C5355; font-weight: 600", subset=["Icono Year-1"]),
             use_container_width=True,
             hide_index=True,
         )
@@ -497,37 +624,17 @@ with p3:
 # ─────────────────────────────────────────────
 
 st.markdown("---")
-st.header("📥 Download Report")
+st.header("📥 Export Data")
 
 report_date = datetime.now().strftime("%Y-%m-%d")
-dl1, dl2 = st.columns(2)
-with dl1:
-    plan_lines = []
-    if acquisition_steps:
-        for step in acquisition_steps:
-            plan_lines.append(
-                f"{step.card} — Apply by {step.apply_date.strftime('%b %d, %Y')} | "
-                f"Fee: ${step.annual_fee:,.0f} | "
-                f"Annual Rewards: ${step.projected_annual_rewards:,.0f} | "
-                f"{step.signup_bonus}"
-            )
-    pdf_bytes = generate_report(results, summary, plan=plan_lines, guide=guide, icono_scores=guide_results)
-    st.download_button(
-        label="📥 Download Full Report (PDF)",
-        data=pdf_bytes,
-        file_name=f"reward_optimizer_report_{report_date}.pdf",
-        mime="application/pdf",
-        use_container_width=True,
-    )
-with dl2:
-    csv_bytes = generate_csv_routing(results)
-    st.download_button(
-        label="📄 Download Routing Table (CSV)",
-        data=csv_bytes,
-        file_name=f"reward_optimizer_routing_{report_date}.csv",
-        mime="text/csv",
-        use_container_width=True,
-    )
+csv_bytes = generate_csv_routing(results)
+st.download_button(
+    label="📄 Download Routing Table (CSV)",
+    data=csv_bytes,
+    file_name=f"reward_optimizer_routing_{report_date}.csv",
+    mime="text/csv",
+    use_container_width=True,
+)
 
 
 # ─────────────────────────────────────────────
@@ -536,9 +643,9 @@ with dl2:
 
 st.markdown("""
 <div class="footer">
-    Built by <strong>Icono</strong> (Iconoclastic Capital Management) · Fee-Only Fiduciary Wealth Management<br>
-    Rochester, NY · <a href="https://iconoclasticcapital.com">iconoclasticcapital.com</a><br>
-    <em>This tool is for informational purposes only and does not constitute financial advice.<br>
-    Card terms, rates, and sign-up bonuses may change — verify before applying.</em>
+    Built by <strong>Icono</strong> (Iconoclastic Capital Management) &middot; Fee-Only Fiduciary Wealth Management<br>
+    Rochester, NY &middot; <a href="https://iconoclasticcapital.com">iconoclasticcapital.com</a><br>
+    <em style="color: #4EB8BC;">This tool is for informational purposes only and does not constitute financial advice.<br>
+    Card terms, rates, and sign-up bonuses may change &mdash; verify before applying.</em>
 </div>
 """, unsafe_allow_html=True)
