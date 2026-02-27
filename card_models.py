@@ -5,6 +5,8 @@ Extracted from reward_optimizer.py to enable clean imports across
 the Streamlit UI, FastAPI backend, and test suite.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -17,7 +19,6 @@ class CardProfile:
     categories: dict = field(default_factory=dict)
     base_rate: float = 0.01  # 1% default
     cpp_valuation: float = 1.0  # cents-per-point (1.0 = cash, 2.0 = UR, etc.)
-    annual_credits: float = 0.0  # Legacy: raw face-value total (display only)
     signup_bonus_value: float = 0.0  # SUB dollar value for acquisition planning
 
     # Icono perk fields — granular credit buckets (all in face-value dollars)
@@ -27,6 +28,70 @@ class CardProfile:
     dining_credit: float = 0.0
     streaming_credit: float = 0.0
     other_credit: float = 0.0
+
+    # DEPRECATED — display only.  Use the granular *_credit fields above.
+    # Not consumed by icono_engine scoring; kept for backwards-compatible display.
+    annual_credits: float = 0.0
+
+
+# ─────────────────────────────────────────────
+#  CPP Mode Utility
+# ─────────────────────────────────────────────
+
+# Conservative floor CPP values — use when cpp_mode == "floor"
+CPP_FLOOR_MAP: dict[str, float] = {
+    "Ultimate Rewards": 1.5,
+    "Membership Rewards": 0.9,
+    "ThankYou Points": 1.5,
+    "Capital One Miles": 1.0,
+    "Bilt Points": 1.5,
+    "Wells Fargo Points": 1.0,
+    "Marriott Bonvoy": 0.7,
+    "Cash Back": 1.0,
+    "Cash Back (Daily Cash)": 1.0,
+}
+
+
+def get_effective_cpp(card: CardProfile, mode: str = "awardwallet") -> float:
+    """Return the cents-per-point value for *card* under the chosen mode.
+
+    Parameters
+    ----------
+    card : CardProfile to evaluate.
+    mode : ``"awardwallet"`` returns ``card.cpp_valuation`` (optimistic, live).
+           ``"floor"`` returns conservative redemption values per currency.
+
+    Returns
+    -------
+    float — effective cpp multiplier.
+    """
+    if mode == "floor":
+        return CPP_FLOOR_MAP.get(card.currency, 1.0)
+    return card.cpp_valuation
+
+
+# ─────────────────────────────────────────────
+#  AwardWallet Integration Stub
+# ─────────────────────────────────────────────
+
+def refresh_cpp_from_awardwallet(cards: dict[str, CardProfile]) -> dict[str, float]:
+    """Placeholder for AwardWallet API integration.
+
+    When wired up, this will call the AwardWallet ``/api/cc`` endpoint,
+    fetch live cpp valuations and category earn-rate updates, and return
+    a dict mapping card name → updated cpp.
+
+    Currently returns each card's existing ``cpp_valuation`` unchanged.
+    """
+    # TODO: implement actual AwardWallet call:
+    #   import requests, os
+    #   resp = requests.get(
+    #       "https://awardwallet.com/api/cc",
+    #       headers={"Authorization": f"Bearer {os.getenv('AWARDWALLET_API_KEY')}"},
+    #   )
+    #   data = resp.json()
+    #   ... map response to cards ...
+    return {name: card.cpp_valuation for name, card in cards.items()}
 
 
 # ─────────────────────────────────────────────

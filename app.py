@@ -508,7 +508,7 @@ with dl1:
                 f"Annual Rewards: ${step.projected_annual_rewards:,.0f} | "
                 f"{step.signup_bonus}"
             )
-    pdf_bytes = generate_report(results, summary, plan=plan_lines)
+    pdf_bytes = generate_report(results, summary, plan=plan_lines, guide=guide, icono_scores=guide_results)
     st.download_button(
         label="📥 Download Full Report (PDF)",
         data=pdf_bytes,

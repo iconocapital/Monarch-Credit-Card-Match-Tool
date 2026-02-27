@@ -1,5 +1,5 @@
 """
-Unit tests for the Icono scoring engine.
+Unit tests for the Icono scoring engine and card model utilities.
 
 Run with:  pytest tests/test_icono.py -v
 """
@@ -7,7 +7,7 @@ Run with:  pytest tests/test_icono.py -v
 import pandas as pd
 import pytest
 
-from card_models import CardProfile, CARD_DB
+from card_models import CardProfile, CARD_DB, get_effective_cpp, CPP_FLOOR_MAP, refresh_cpp_from_awardwallet
 from icono_engine import (
     map_earn_category,
     icono_perk_value,
@@ -18,6 +18,55 @@ from icono_engine import (
     analyze_cards,
     ICONO_WEIGHTS,
 )
+
+
+# ─────────────────────────────────────────────
+#  get_effective_cpp tests
+# ─────────────────────────────────────────────
+
+class TestGetEffectiveCpp:
+    def test_awardwallet_mode_returns_card_value(self):
+        card = CARD_DB["Chase Sapphire Reserve"]
+        assert get_effective_cpp(card, mode="awardwallet") == 2.0
+
+    def test_floor_mode_ur(self):
+        card = CARD_DB["Chase Sapphire Reserve"]
+        assert get_effective_cpp(card, mode="floor") == 1.5
+
+    def test_floor_mode_mr(self):
+        card = CARD_DB["Amex Platinum"]
+        assert get_effective_cpp(card, mode="floor") == 0.9
+
+    def test_floor_mode_cashback(self):
+        card = CARD_DB["Citi Double Cash"]
+        assert get_effective_cpp(card, mode="floor") == 1.0
+
+    def test_floor_mode_ty_points(self):
+        card = CARD_DB["Citi Strata Premier"]
+        assert get_effective_cpp(card, mode="floor") == 1.5
+
+    def test_floor_mode_bilt(self):
+        card = CARD_DB["Bilt Mastercard"]
+        assert get_effective_cpp(card, mode="floor") == 1.5
+
+    def test_default_mode_is_awardwallet(self):
+        card = CARD_DB["Amex Gold"]
+        assert get_effective_cpp(card) == card.cpp_valuation
+
+
+# ─────────────────────────────────────────────
+#  refresh_cpp_from_awardwallet stub tests
+# ─────────────────────────────────────────────
+
+class TestRefreshCppStub:
+    def test_returns_all_cards(self):
+        result = refresh_cpp_from_awardwallet(CARD_DB)
+        assert len(result) == len(CARD_DB)
+
+    def test_returns_current_values(self):
+        result = refresh_cpp_from_awardwallet(CARD_DB)
+        assert result["Chase Sapphire Reserve"] == 2.0
+        assert result["Amex Platinum"] == 1.99
 
 
 # ─────────────────────────────────────────────
@@ -209,33 +258,58 @@ class TestCardBaseRewards:
 
 
 # ─────────────────────────────────────────────
-#  analyze_cards tests
+#  analyze_cards tests (now returns dict)
 # ─────────────────────────────────────────────
 
 class TestAnalyzeCards:
-    def test_returns_sorted_by_year1(self):
+    def test_returns_dict_with_expected_keys(self):
+        df = pd.DataFrame([{"Category": "Groceries", "Amount": -100}])
+        result = analyze_cards(df, cards=[CARD_DB["Citi Double Cash"]])
+        assert "cards" in result
+        assert "total_spend" in result
+        assert "meta" in result
+
+    def test_cards_sorted_by_year1(self):
         df = pd.DataFrame([
             {"Category": "Groceries", "Amount": -500},
             {"Category": "Restaurants", "Amount": -300},
         ])
-        results = analyze_cards(df, cards=[
+        result = analyze_cards(df, cards=[
             CARD_DB["Chase Freedom Unlimited"],
             CARD_DB["Amex Gold"],
         ])
-        assert len(results) == 2
-        assert results[0]["icono_year1"] >= results[1]["icono_year1"]
+        cards = result["cards"]
+        assert len(cards) == 2
+        assert cards[0]["icono_year1"] >= cards[1]["icono_year1"]
 
-    def test_result_keys(self):
+    def test_result_card_keys(self):
         df = pd.DataFrame([{"Category": "Groceries", "Amount": -100}])
-        results = analyze_cards(df, cards=[CARD_DB["Citi Double Cash"]])
-        assert len(results) == 1
-        r = results[0]
+        result = analyze_cards(df, cards=[CARD_DB["Citi Double Cash"]])
+        cards = result["cards"]
+        assert len(cards) == 1
+        r = cards[0]
         assert "name" in r
         assert "base_rewards_value" in r
         assert "perks_value" in r
         assert "icono_ongoing" in r
         assert "icono_year1" in r
         assert "annual_fee" in r
+
+    def test_total_spend_computed(self):
+        df = pd.DataFrame([
+            {"Category": "Groceries", "Amount": -500},
+            {"Category": "Restaurants", "Amount": -300},
+        ])
+        result = analyze_cards(df, cards=[CARD_DB["Citi Double Cash"]])
+        assert result["total_spend"] == 800.0
+
+    def test_meta_contains_expected_fields(self):
+        df = pd.DataFrame([{"Category": "Groceries", "Amount": -100}])
+        result = analyze_cards(df, cards=[CARD_DB["Citi Double Cash"]], cpp_mode="floor")
+        meta = result["meta"]
+        assert meta["cpp_mode"] == "floor"
+        assert meta["cards_evaluated"] == 1
+        assert meta["txn_count"] == 1
 
 
 # ─────────────────────────────────────────────
@@ -362,3 +436,31 @@ class TestGenerateGuide:
         results = [_make_result(perks=0.0, base_rewards=200.0)]
         guide = generate_guide(results)
         assert len(guide["bullets"]) >= 1
+
+
+# ─────────────────────────────────────────────
+#  CardProfile.annual_credits deprecation test
+# ─────────────────────────────────────────────
+
+class TestAnnualCreditsDeprecation:
+    def test_annual_credits_still_accessible(self):
+        """annual_credits should still be readable for display purposes."""
+        plat = CARD_DB["Amex Platinum"]
+        assert plat.annual_credits == 840
+
+    def test_annual_credits_not_used_in_scoring(self):
+        """icono_perk_value should use granular credit fields, not annual_credits."""
+        card = CardProfile(
+            name="Test", annual_fee=0,
+            annual_credits=9999,  # huge value that should NOT affect perk calc
+        )
+        assert icono_perk_value(card) == 0.0  # no granular credits set
+
+    def test_granular_credits_match_annual_credits(self):
+        """For Amex Platinum, sum of granular credits should equal annual_credits."""
+        plat = CARD_DB["Amex Platinum"]
+        granular_sum = (
+            plat.hotel_credit + plat.travel_credit + plat.uber_credit
+            + plat.dining_credit + plat.streaming_credit + plat.other_credit
+        )
+        assert granular_sum == plat.annual_credits

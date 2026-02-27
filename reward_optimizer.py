@@ -19,6 +19,7 @@ from enum import Enum
 from card_models import CardProfile, CARD_DB
 from icono_engine import (
     icono_perk_value, icono_score_ongoing, icono_score_year1,
+    load_transactions, map_earn_category,
     CATEGORY_MAP, ACH_CATEGORIES,
     NON_EXPENSE_CATEGORIES, NON_EXPENSE_PATTERNS,
     NON_EXPENSE_MERCHANTS, NON_EXPENSE_MERCHANT_PATTERNS,
@@ -503,25 +504,10 @@ class RewardOptimizer:
         """
         bilt_housing_rate = self.calc_bilt_housing_rate(monthly_housing, monthly_nonhousing_bilt)
 
-        # ── Step 1: Clean the data — filter non-expense rows ──
-        work = df.copy()
-
-        # Normalize amount column to numeric
-        work[amount_col] = pd.to_numeric(work[amount_col], errors="coerce").fillna(0)
-
-        # Remove income / positive amounts (deposits, refunds, paychecks)
-        # In Monarch, expenses are negative, income is positive
-        work = work[work[amount_col] < 0]
-
-        # Remove non-expense categories (transfers, payments, income)
-        cat_lower = work[category_col].str.lower().str.strip()
-        # Exact match exclusion
-        mask_exact = cat_lower.isin(NON_EXPENSE_CATEGORIES)
-        # Partial match exclusion (e.g. "Transfer to Matt", "Transfer to Nick")
-        mask_partial = pd.Series(False, index=work.index)
-        for pattern in NON_EXPENSE_PATTERNS:
-            mask_partial = mask_partial | cat_lower.str.startswith(pattern, na=False)
-        work = work[~(mask_exact | mask_partial)]
+        # ── Step 1: Clean the data — use icono_engine.load_transactions ──
+        # load_transactions is the single source of truth for non-expense
+        # filtering and category normalization.
+        work = load_transactions(df, category_col=category_col, amount_col=amount_col)
 
         # ── Step 2: Split by account type (credit card vs bank/savings) ──
         account_col = "Account"
@@ -583,7 +569,7 @@ class RewardOptimizer:
 
         for _, row in card_txns.iterrows():
             cat = row.get(category_col, "")
-            amt = abs(float(row.get(amount_col, 0)))
+            amt = float(row.get("_spend", abs(float(row.get(amount_col, 0)))))
             ts = row.get(timestamp_col)
 
             rec = self.get_optimal_card(cat, amt, ts, bilt_housing_rate)
@@ -616,7 +602,7 @@ class RewardOptimizer:
         # ── Step 5: Analyze bank transactions for ACH leakage opportunities ──
         for _, row in bank_txns.iterrows():
             cat = row.get(category_col, "")
-            amt = abs(float(row.get(amount_col, 0)))
+            amt = float(row.get("_spend", abs(float(row.get(amount_col, 0)))))
             ts = row.get(timestamp_col)
             merchant = str(row.get("Merchant", ""))
             account = row.get(account_col, "")

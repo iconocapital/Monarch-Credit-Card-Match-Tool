@@ -4,6 +4,8 @@ FastAPI backend for the Icono Credit Card Reward Optimizer.
 Run with:  uvicorn api:app --reload
 """
 
+import os
+
 from fastapi import FastAPI, File, Form, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import pandas as pd
@@ -19,10 +21,16 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# CORS — allow any frontend during development
+# CORS — restrict to known front-end origins in production.
+# Set ALLOWED_ORIGINS env var to a comma-separated list of origins,
+# e.g. "https://iconocapital.com,https://www.iconocapital.com"
+# Falls back to "*" for local development.
+_allowed_origins = os.environ.get("ALLOWED_ORIGINS", "*")
+allow_origins = [o.strip() for o in _allowed_origins.split(",")] if _allowed_origins != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -49,26 +57,20 @@ async def analyze(
 
     Returns
     -------
-    JSON with ``cards`` (list of scored cards) and ``guide`` (JVN commentary).
+    JSON with ``cards`` (list of scored cards), ``guide`` (JVN commentary),
+    and ``meta`` (cpp_mode, total_spend, cards_evaluated, txn_count).
     """
     content = await file.read()
     text = content.decode("utf-8")
     df = pd.read_csv(StringIO(text))
 
     cards = list(CARD_DB.values())
-    results = analyze_cards(df, cards=cards, cpp_mode=cpp_mode)
+    analysis = analyze_cards(df, cards=cards, cpp_mode=cpp_mode)
 
-    total_spend = df["Amount"].apply(pd.to_numeric, errors="coerce").fillna(0)
-    total_spend = float(total_spend[total_spend < 0].abs().sum())
-
-    guide = generate_guide(results, total_spend=total_spend)
+    guide = generate_guide(analysis["cards"], total_spend=analysis["total_spend"])
 
     return {
-        "cards": results,
+        "cards": analysis["cards"],
         "guide": guide,
-        "meta": {
-            "cpp_mode": cpp_mode,
-            "total_spend": round(total_spend, 2),
-            "cards_evaluated": len(results),
-        },
+        "meta": analysis["meta"],
     }
