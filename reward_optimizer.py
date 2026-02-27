@@ -19,6 +19,7 @@ from enum import Enum
 from card_models import CardProfile, CARD_DB
 from icono_engine import (
     icono_perk_value, icono_score_ongoing, icono_score_year1,
+    load_transactions, map_earn_category,
     CATEGORY_MAP, ACH_CATEGORIES,
     NON_EXPENSE_CATEGORIES, NON_EXPENSE_PATTERNS,
     NON_EXPENSE_MERCHANTS, NON_EXPENSE_MERCHANT_PATTERNS,
@@ -34,7 +35,8 @@ class SpendFlag(Enum):
     ACH_LEAKAGE = "ACH/Bank Pay → Move to credit card for rewards"
     INSURANCE_OPP = "Insurance spend earning 0% → card opportunity exists"
     BELOW_FLOOR = "Earning below 2% floor — use flat-rate fallback"
-    BILT_FIRST = "Bilt 1st-of-month double points opportunity"
+    BILT_HOUSING_TIER = "Bilt 2.0 tiered housing multiplier active"
+    BILT_CASH_PATH = "Bilt Cash path: 4% Bilt Cash → redeem for housing points"
     CITI_NIGHT = "Citi Nights 6x multiplier window (Fri/Sat 6pm–6am ET)"
     ROTATING_Q = "Quarterly rotating bonus category active"
 
@@ -106,7 +108,11 @@ ACCOUNT_NAME_PATTERNS: list[tuple[str, str]] = [
     ("atmos ascend",            "Bank of America Atmos Ascend"),
     # No-Fee Travel  (check "venture" AFTER venture x / ventureone)
     ("venture",                 "Capital One Venture"),
-    ("bilt",                    "Bilt Mastercard"),
+    # Bilt 2.0 (specific first, generic last)
+    ("bilt palladium",          "Bilt Palladium"),
+    ("bilt obsidian",           "Bilt Obsidian"),
+    ("bilt blue",               "Bilt Blue"),
+    ("bilt",                    "Bilt Blue"),  # default to Blue for generic "Bilt" match
     # Flat Rate Cash Back
     ("freedom unlimited",       "Chase Freedom Unlimited"),
     ("double cash",             "Citi Double Cash"),
@@ -119,28 +125,25 @@ ACCOUNT_NAME_PATTERNS: list[tuple[str, str]] = [
     ("savor",                   "Capital One Savor"),
     ("custom cash",             "Citi Custom Cash"),
     ("premium rewards",         "Bank of America Premium Rewards"),
-    # Business
-    ("blue business plus",      "Blue Business Plus"),
-    ("bbp",                     "Blue Business Plus"),
-    # Store / Co-Brand
+    # Store / Brand-Specific
     ("amazon",                  "Amazon Prime Visa"),
     ("prime visa",              "Amazon Prime Visa"),
     ("apple card",              "Apple Card"),
+    ("target circle",           "Target Circle Card"),
+    ("target redcard",          "Target Circle Card"),
     ("marriott",                "Chase Marriott Bonvoy Boundless"),
     ("bonvoy",                  "Chase Marriott Bonvoy Boundless"),
-    # Wells Fargo (additional)
+    # Wells Fargo
     ("autograph journey",       "Wells Fargo Autograph Journey"),
     ("attune",                  "Wells Fargo Attune"),
     # US Bank
     ("cash+",                   "US Bank Cash+"),
     ("us bank cash",            "US Bank Cash+"),
-    # State Farm
-    ("state farm",              "State Farm Premier Cash Rewards"),
 ]
 
 # Bank account keywords to skip during card detection
 _BANK_ACCOUNT_KEYWORDS = (
-    "checking", "savings", "fund", "emergency", "target",
+    "checking", "savings", "fund", "emergency", "target savings",
     "money market", "brokerage", "ira", "401k", "hsa",
 )
 
@@ -229,43 +232,63 @@ class RewardOptimizer:
         except (ValueError, TypeError):
             return False
 
-    @staticmethod
-    def is_bilt_first(timestamp) -> bool:
-        """1st of the month → Bilt double points day."""
-        try:
-            dt = pd.to_datetime(timestamp)
-            return dt.day == 1
-        except (ValueError, TypeError):
-            return False
-
     def _get_active_rotation(self, txn_date: datetime) -> dict:
         """Return the rotating category bonuses active for a given date."""
         year = txn_date.year
         quarter = get_quarter(txn_date)
         return QUARTERLY_ROTATIONS.get(year, {}).get(quarter, {})
 
-    # --- Bilt tiered housing logic ---
+    # --- Bilt 2.0 housing logic ---
 
     @staticmethod
-    def calc_bilt_housing_rate(monthly_housing: float, monthly_nonhousing_on_bilt: float) -> float:
-        """
-        Bilt tiered housing multiplier:
-        Spend ≥ 100% of housing amount on non-housing → 1.25x
-        Spend ≥ 50%  → 1.0x
-        Spend ≥ 25%  → 0.75x
-        Below 25%    → 0.50x
+    def calc_bilt_housing_rate(monthly_housing: float, monthly_everyday_spend: float) -> float:
+        """Bilt 2.0 tiered housing multiplier (Option 1 — Tiered Points Path).
+
+        Everyday spend ratio to housing determines the housing earn rate:
+          Spend ≥ 100% of housing → 1.25x Bilt Points on housing
+          Spend ≥  75% of housing → 1.0x  Bilt Points on housing
+          Spend ≥  50% of housing → 0.75x Bilt Points on housing
+          Below 50%               → 0.50x Bilt Points on housing
         """
         if monthly_housing == 0:
             return 0.01
-        ratio = monthly_nonhousing_on_bilt / monthly_housing
+        ratio = monthly_everyday_spend / monthly_housing
         if ratio >= 1.0:
             return 0.0125
-        elif ratio >= 0.5:
+        elif ratio >= 0.75:
             return 0.01
-        elif ratio >= 0.25:
+        elif ratio >= 0.50:
             return 0.0075
         else:
             return 0.005
+
+    @staticmethod
+    def calc_bilt_cash_housing_value(
+        monthly_housing: float,
+        monthly_everyday_spend: float,
+    ) -> float:
+        """Bilt 2.0 Bilt Cash unlock path (Option 2).
+
+        Everyday spend earns 4% Bilt Cash.  Each $30 Bilt Cash unlocks 1,000
+        Bilt Points on housing, up to the 1x rate (i.e., up to
+        ``monthly_housing * 0.01`` worth of Bilt Points).
+
+        Returns the effective housing earn rate (as a decimal, e.g. 0.01 = 1x).
+        """
+        if monthly_housing == 0:
+            return 0.0
+        bilt_cash_earned = monthly_everyday_spend * 0.04
+        points_unlockable = (bilt_cash_earned / 30.0) * 1000
+        max_housing_points = monthly_housing * 0.01  # 1x cap (in points)
+        actual_points = min(points_unlockable, max_housing_points)
+        return actual_points / monthly_housing if monthly_housing > 0 else 0.0
+
+    def get_best_bilt_card(self) -> str:
+        """Return the best Bilt card the user owns, preferring Palladium > Obsidian > Blue."""
+        for name in ("Bilt Palladium", "Bilt Obsidian", "Bilt Blue"):
+            if name in self.owned_cards or name in self.cards:
+                return name
+        return "Bilt Blue"
 
     # --- Core matching ---
 
@@ -298,39 +321,36 @@ class RewardOptimizer:
 
         # --- Category-specific matching ---
         candidates: list[tuple[str, float, str]] = []
+        bilt_card = self.get_best_bilt_card()
 
-        # Housing
+        # Housing — Bilt 2.0 is the primary path
         if internal_tag == "housing":
             flags.append(SpendFlag.ACH_LEAKAGE)
+            flags.append(SpendFlag.BILT_HOUSING_TIER)
             candidates.append((
-                "Bilt Mastercard",
+                bilt_card,
                 bilt_housing_rate * 100,
-                f"Bilt tiered housing multiplier ({bilt_housing_rate*100:.2f}%). Move from ACH to Bilt.",
+                f"Bilt 2.0 tiered housing ({bilt_housing_rate*100:.2f}%). Move from ACH to Bilt.",
             ))
 
-        # Dining — check Citi Nights
+        # Dining — check Citi Nights, Bilt Obsidian 3x
         elif internal_tag == "dining":
             if self.is_citi_night(timestamp):
                 flags.append(SpendFlag.CITI_NIGHT)
-                candidates.append(("Citi Strata Premier", 6.0, "Citi Nights 6x (Fri/Sat 6pm–6am ET)."))
-
-            # Bilt 1st of month double points on dining
-            if self.is_bilt_first(timestamp):
-                flags.append(SpendFlag.BILT_FIRST)
-                candidates.append(("Bilt Mastercard", 6.0, "Bilt 1st-of-month: dining doubled to 6x."))
+                candidates.append(("Citi Strata Premier", 6.0, "Citi Nights 6x (Fri/Sat 6pm-6am ET)."))
 
             candidates.append(("Citi Strata Premier", 3.0, "Standard 3x dining."))
-            candidates.append(("Bilt Mastercard", 3.0, "Bilt 3x dining."))
+            candidates.append(("Bilt Obsidian", 3.0, "Bilt Obsidian 3x dining."))
             candidates.append(("Capital One Savor", 4.0, "4% dining."))
             candidates.append(("Bank of America Atmos Summit", 4.0, "4% dining."))
 
-            # Add rotating if applicable
             if best_rotating_card:
                 candidates.append((best_rotating_card, best_rotating_rate * 100, best_rotating_note))
 
         # Groceries
         elif internal_tag == "groceries":
             candidates.append(("Amex Blue Cash Preferred", 6.0, "6% groceries (up to $6k/yr)."))
+            candidates.append(("Bilt Obsidian", 3.0, "Bilt Obsidian 3x groceries."))
             candidates.append(("Capital One Savor", 3.0, "3% groceries."))
             if best_rotating_card:
                 candidates.append((best_rotating_card, best_rotating_rate * 100, best_rotating_note))
@@ -379,7 +399,6 @@ class RewardOptimizer:
 
         # Travel (general)
         elif internal_tag == "travel":
-            candidates.append(("Bilt Mastercard", 2.0, "2x travel."))
             candidates.append(("Wells Fargo Autograph Journey", 3.0, "3x travel (if classified)."))
             candidates.append(("Bank of America Atmos Summit", 3.0, "3% travel."))
 
@@ -398,10 +417,7 @@ class RewardOptimizer:
         # Insurance
         elif internal_tag == "insurance":
             flags.append(SpendFlag.INSURANCE_OPP)
-            candidates.append(("State Farm Premier Cash Rewards", 3.0, "3% on insurance premiums."))
-            if self.is_bilt_first(timestamp):
-                flags.append(SpendFlag.BILT_FIRST)
-                candidates.append(("Bilt Mastercard", 4.0, "Bilt 1st-of-month: 2x base → 4x on insurance."))
+            # No dedicated insurance card — route to best general card
 
         # Auto (general)
         elif internal_tag == "auto":
@@ -419,6 +435,10 @@ class RewardOptimizer:
         # Apple
         elif internal_tag == "apple":
             candidates.append(("Apple Card", 3.0, "3% Apple purchases."))
+
+        # Target
+        elif internal_tag == "target":
+            candidates.append(("Target Circle Card", 5.0, "5% at Target stores."))
 
         # Online retail
         elif internal_tag == "online_retail":
@@ -493,8 +513,8 @@ class RewardOptimizer:
         ----------
         df : DataFrame with at minimum a category and amount column.
         category_col / amount_col / timestamp_col : column name overrides.
-        monthly_housing : for Bilt tiered housing calc.
-        monthly_nonhousing_bilt : non-housing spend on Bilt for tier calc.
+        monthly_housing : for Bilt 2.0 tiered housing calc.
+        monthly_nonhousing_bilt : everyday (non-housing) spend for Bilt tier calc.
 
         Returns
         -------
@@ -503,25 +523,10 @@ class RewardOptimizer:
         """
         bilt_housing_rate = self.calc_bilt_housing_rate(monthly_housing, monthly_nonhousing_bilt)
 
-        # ── Step 1: Clean the data — filter non-expense rows ──
-        work = df.copy()
-
-        # Normalize amount column to numeric
-        work[amount_col] = pd.to_numeric(work[amount_col], errors="coerce").fillna(0)
-
-        # Remove income / positive amounts (deposits, refunds, paychecks)
-        # In Monarch, expenses are negative, income is positive
-        work = work[work[amount_col] < 0]
-
-        # Remove non-expense categories (transfers, payments, income)
-        cat_lower = work[category_col].str.lower().str.strip()
-        # Exact match exclusion
-        mask_exact = cat_lower.isin(NON_EXPENSE_CATEGORIES)
-        # Partial match exclusion (e.g. "Transfer to Matt", "Transfer to Nick")
-        mask_partial = pd.Series(False, index=work.index)
-        for pattern in NON_EXPENSE_PATTERNS:
-            mask_partial = mask_partial | cat_lower.str.startswith(pattern, na=False)
-        work = work[~(mask_exact | mask_partial)]
+        # ── Step 1: Clean the data — use icono_engine.load_transactions ──
+        # load_transactions is the single source of truth for non-expense
+        # filtering and category normalization.
+        work = load_transactions(df, category_col=category_col, amount_col=amount_col)
 
         # ── Step 2: Split by account type (credit card vs bank/savings) ──
         account_col = "Account"
@@ -583,7 +588,7 @@ class RewardOptimizer:
 
         for _, row in card_txns.iterrows():
             cat = row.get(category_col, "")
-            amt = abs(float(row.get(amount_col, 0)))
+            amt = float(row.get("_spend", abs(float(row.get(amount_col, 0)))))
             ts = row.get(timestamp_col)
 
             rec = self.get_optimal_card(cat, amt, ts, bilt_housing_rate)
@@ -616,7 +621,7 @@ class RewardOptimizer:
         # ── Step 5: Analyze bank transactions for ACH leakage opportunities ──
         for _, row in bank_txns.iterrows():
             cat = row.get(category_col, "")
-            amt = abs(float(row.get(amount_col, 0)))
+            amt = float(row.get("_spend", abs(float(row.get(amount_col, 0)))))
             ts = row.get(timestamp_col)
             merchant = str(row.get("Merchant", ""))
             account = row.get(account_col, "")
@@ -794,7 +799,10 @@ SIGNUP_BONUSES: dict[str, str] = {
     "Bank of America Atmos Ascend": "≈ $600 back ($3k/3mo)",
     # No-Fee Travel
     "Capital One VentureOne":    "20,000 miles ($500/3mo) ≈ $408 at 2.04 cpp",
-    "Bilt Mastercard":           "None (points on rent from day 1)",
+    # Bilt 2.0
+    "Bilt Blue":                 "None (earn on rent from day 1, no fee)",
+    "Bilt Obsidian":             "None ($95/yr, 3x dining/groceries, $100 hotel credit)",
+    "Bilt Palladium":            "None ($495/yr, 2x everything, $400 hotel credit, Priority Pass)",
     # Flat Rate Cash Back
     "Chase Freedom Unlimited":   "20,000 UR pts ($500/3mo) ≈ $400 at 2.0 cpp",
     "Citi Double Cash":          "$200 back ($1.5k/6mo)",
@@ -807,19 +815,16 @@ SIGNUP_BONUSES: dict[str, str] = {
     "Citi Custom Cash":          "20,000 TY pts ($1.5k/6mo) ≈ $458 at 2.29 cpp",
     "Capital One Savor":         "$200 back ($500/3mo)",
     "Bank of America Premium Rewards": "≈ $600 back ($3k/3mo)",
-    # Business
-    "Blue Business Plus":        "15,000 MR pts ($3k/3mo) ≈ $298.50 at 1.99 cpp",
-    # Store / Co-Brand
+    # Store / Brand-Specific
     "Amazon Prime Visa":         "$150 Amazon gift card (instant approval)",
     "Apple Card":                "None (3% Daily Cash on Apple purchases)",
+    "Target Circle Card":        "None (5% at Target stores)",
     "Chase Marriott Bonvoy Boundless": "75,000 Marriott pts ($3k/3mo) ≈ $525 at 0.7 cpp",
-    # Wells Fargo (additional)
+    # Wells Fargo
     "Wells Fargo Autograph Journey": "$500 back ($1k/3mo)",
     "Wells Fargo Attune":            "$200 back ($500/3mo)",
     # US Bank
     "US Bank Cash+":                 "$200 back ($1k/3mo)",
-    # State Farm
-    "State Farm Premier Cash Rewards": "None",
 }
 
 # Hard inquiry constraints per bureau (5/24 for Chase, 6/24 for Amex, etc.)
@@ -829,13 +834,13 @@ ISSUER_VELOCITY_NOTES: dict[str, str] = {
     "Citi":           "8/65 rule (1 app/8 days, 2/65 days); 24-month SUB restriction on same card family",
     "Capital One":    "Typically limits to 2 C1 cards; may auto-deny if already at limit",
     "Wells Fargo":    "Generally 1 per product family at a time; cell phone restriction",
-    "Bilt":           "Invite-only via rent network; no traditional hard pull for existing renters",
+    "Bilt":           "Bilt 2.0 — Blue is no-fee; Obsidian/Palladium require invite or existing Bilt relationship",
     "PayPal":         "Issued by Synchrony; moderate approval standards",
     "Amazon/Chase":   "Subject to Chase 5/24 rule (co-branded Chase card)",
     "Apple/Goldman":  "Soft pull for pre-approval; Goldman Sachs underwriting",
+    "Target":         "Store card issued by TD Bank; separate from traditional credit inquiries",
     "Bank of America": "7/12 rule (max 7 cards/12 months); 2/3/4 rule (2 BoA cards/2mo, 3/12mo, 4/24mo)",
     "US Bank":        "Generally conservative; may require existing US Bank relationship",
-    "State Farm":     "Issued by US Bank; requires State Farm insurance policy",
 }
 
 
@@ -870,18 +875,18 @@ class CardAcquisitionPlanner:
                        "Chase Freedom Unlimited", "Chase Freedom Flex",
                        "Amazon Prime Visa", "Chase Marriott Bonvoy Boundless"],
             "Amex": ["Amex Platinum", "Amex Gold", "Amex Blue Cash Preferred",
-                      "Amex Blue Cash Everyday", "Blue Business Plus"],
+                      "Amex Blue Cash Everyday"],
             "Citi": ["Citi Strata Premier", "Citi Double Cash", "Citi Custom Cash"],
             "Capital One": ["Capital One Venture X", "Capital One Venture", "Capital One VentureOne",
                             "Capital One SavorOne", "Capital One Savor"],
             "Wells Fargo": ["Wells Fargo Autograph Journey", "Wells Fargo Attune"],
-            "Bilt": ["Bilt Mastercard"],
+            "Bilt": ["Bilt Blue", "Bilt Obsidian", "Bilt Palladium"],
             "PayPal": ["PayPal Cashback Mastercard"],
             "Apple/Goldman": ["Apple Card"],
+            "Target": ["Target Circle Card"],
             "Bank of America": ["Bank of America Atmos Summit", "Bank of America Atmos Ascend",
                                 "Bank of America Premium Rewards"],
             "US Bank": ["US Bank Cash+"],
-            "State Farm": ["State Farm Premier Cash Rewards"],
         }
         for issuer, cards in issuer_map.items():
             if card_name in cards:
@@ -1064,7 +1069,7 @@ if __name__ == "__main__":
     # Sample Monarch-style spending data (expenses are negative in Monarch)
     # Account column allows auto-detection of owned cards
     sample_data = pd.DataFrame([
-        {"Category": "Rent",              "Amount": -3000, "Date": "2026-02-01", "Account": "Bilt Mastercard (...4321)"},
+        {"Category": "Rent",              "Amount": -3000, "Date": "2026-02-01", "Account": "Bilt Blue (...4321)"},
         {"Category": "Groceries",         "Amount": -800,  "Date": "2026-02-10", "Account": "Blue Cash Preferred (...9999)"},
         {"Category": "Restaurants",       "Amount": -400,  "Date": "2026-02-07 19:30", "Account": "Venture X (...6789)"},
         {"Category": "Restaurants",       "Amount": -150,  "Date": "2026-02-12 12:00", "Account": "Venture X (...6789)"},
@@ -1085,7 +1090,7 @@ if __name__ == "__main__":
     ])
 
     # Owned cards: auto-detected from Account column + explicitly passed
-    owned = {"Amex Blue Cash Preferred", "Capital One Venture X"}
+    owned = {"Amex Blue Cash Preferred", "Capital One Venture X", "Bilt Blue"}
     optimizer = RewardOptimizer(owned_cards=owned)
     results, summary = optimizer.analyze(
         sample_data,

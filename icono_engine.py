@@ -1,7 +1,9 @@
 """
 Icono scoring engine — perk valuation, transaction analysis, and card scoring.
 
-Provides:
+Single source of truth for:
+- Category normalization (CATEGORY_MAP)
+- Non-expense filters (NON_EXPENSE_*)
 - Weighted perk haircuts (Icono philosophy)
 - Per-card reward simulation on real transaction data
 - Ongoing / Year-1 Icono score computation
@@ -9,7 +11,7 @@ Provides:
 """
 
 import pandas as pd
-from card_models import CardProfile, CARD_DB
+from card_models import CardProfile, CARD_DB, get_effective_cpp
 
 
 # ─────────────────────────────────────────────
@@ -77,7 +79,7 @@ CATEGORY_MAP: dict[str, str] = {
 
     # Online/Store-specific
     "Amazon": "amazon", "Whole Foods": "whole_foods",
-    "Apple": "apple",
+    "Apple": "apple", "Target": "target",
 
     # Education
     "Education": "general",
@@ -182,18 +184,12 @@ def icono_score_year1(card: CardProfile, annual_rewards: float) -> float:
 # ─────────────────────────────────────────────
 #  Conservative CPP Floor Values
 # ─────────────────────────────────────────────
+# Canonical map lives in card_models.CPP_FLOOR_MAP.
+# Re-exported here for backwards compatibility.
 
-CPP_FLOOR_VALUES: dict[str, float] = {
-    "Ultimate Rewards": 1.5,
-    "Membership Rewards": 0.9,
-    "ThankYou Points": 1.5,
-    "Capital One Miles": 1.0,
-    "Bilt Points": 1.5,
-    "Wells Fargo Points": 1.0,
-    "Marriott Bonvoy": 0.7,
-    "Cash Back": 1.0,
-    "Cash Back (Daily Cash)": 1.0,
-}
+from card_models import CPP_FLOOR_MAP
+
+CPP_FLOOR_VALUES = CPP_FLOOR_MAP
 
 
 # ─────────────────────────────────────────────
@@ -258,9 +254,7 @@ def card_base_rewards(
     cpp_mode : ``"awardwallet"`` uses ``card.cpp_valuation``;
                ``"floor"`` uses conservative CPP_FLOOR_VALUES.
     """
-    cpp = card.cpp_valuation
-    if cpp_mode == "floor":
-        cpp = CPP_FLOOR_VALUES.get(card.currency, 1.0)
+    cpp = get_effective_cpp(card, mode=cpp_mode)
 
     total = 0.0
     for _, row in df.iterrows():
@@ -275,7 +269,7 @@ def analyze_cards(
     df: pd.DataFrame,
     cards: list[CardProfile] | None = None,
     cpp_mode: str = "awardwallet",
-) -> list[dict]:
+) -> dict:
     """Run Icono analysis across all cards on the given transaction data.
 
     Parameters
@@ -287,23 +281,25 @@ def analyze_cards(
 
     Returns
     -------
-    List of dicts sorted by ``icono_year1`` descending, each containing:
-    ``name``, ``base_rewards_value``, ``perks_value``, ``icono_ongoing``,
-    ``icono_year1``, ``annual_fee``, ``signup_bonus``.
+    dict with:
+      ``cards`` — list of dicts sorted by ``icono_year1`` descending.
+      ``total_spend`` — sum of earnable transaction amounts.
+      ``meta`` — dict with ``cpp_mode``, ``cards_evaluated``, ``txn_count``.
     """
     if cards is None:
         cards = list(CARD_DB.values())
 
     clean_df = load_transactions(df)
+    total_spend = float(clean_df["_spend"].sum()) if not clean_df.empty else 0.0
 
-    results = []
+    card_results = []
     for card in cards:
         base_val = card_base_rewards(card, clean_df, cpp_mode)
         perks_val = icono_perk_value(card)
         ongoing = icono_score_ongoing(card, base_val)
         year1 = icono_score_year1(card, base_val)
 
-        results.append({
+        card_results.append({
             "name": card.name,
             "base_rewards_value": round(base_val, 2),
             "perks_value": round(perks_val, 2),
@@ -313,5 +309,14 @@ def analyze_cards(
             "signup_bonus": card.signup_bonus_value,
         })
 
-    results.sort(key=lambda r: r["icono_year1"], reverse=True)
-    return results
+    card_results.sort(key=lambda r: r["icono_year1"], reverse=True)
+
+    return {
+        "cards": card_results,
+        "total_spend": round(total_spend, 2),
+        "meta": {
+            "cpp_mode": cpp_mode,
+            "cards_evaluated": len(card_results),
+            "txn_count": len(clean_df),
+        },
+    }

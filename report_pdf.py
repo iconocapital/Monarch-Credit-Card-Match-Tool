@@ -18,8 +18,24 @@ def _sanitize(text: str) -> str:
     return text.encode("latin-1", errors="replace").decode("latin-1")
 
 
-def generate_report(results: pd.DataFrame, summary: dict, plan: list) -> bytes:
-    """Generate a PDF report and return as bytes."""
+def generate_report(
+    results: pd.DataFrame,
+    summary: dict,
+    plan: list,
+    guide: dict | None = None,
+    icono_scores: list[dict] | None = None,
+) -> bytes:
+    """Generate a PDF report and return as bytes.
+
+    Parameters
+    ----------
+    results : DataFrame with per-transaction routing details.
+    summary : dict from ``RewardOptimizer.analyze()`` containing KPIs.
+    plan : list of acquisition plan lines (strings).
+    guide : optional dict from ``generate_guide()`` with headline/bullets.
+    icono_scores : optional list of card dicts (from ``analyze_cards``)
+                   sorted by ``icono_year1`` descending.
+    """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -43,6 +59,38 @@ def generate_report(results: pd.DataFrame, summary: dict, plan: list) -> bytes:
     )
     pdf.cell(0, 7, f"Net Annual Value:     ${net_annual:,.2f}", ln=True)
     pdf.ln(4)
+
+    # JVN-Style Commentary
+    if guide:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "Icono Says...", ln=True)
+        pdf.set_font("Helvetica", "I", 11)
+        pdf.multi_cell(0, 7, _sanitize(guide.get("headline", "")))
+        pdf.set_font("Helvetica", "", 10)
+        for bullet in guide.get("bullets", []):
+            pdf.multi_cell(0, 6, _sanitize(f"  - {bullet}"))
+        pdf.ln(4)
+
+    # Top Icono-Ranked Cards
+    if icono_scores:
+        pdf.set_font("Helvetica", "B", 14)
+        pdf.cell(0, 10, "Top Icono-Ranked Cards", ln=True)
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.cell(60, 7, "Card", border=1)
+        pdf.cell(30, 7, "Ongoing", border=1, align="R")
+        pdf.cell(30, 7, "Year-1", border=1, align="R")
+        pdf.cell(25, 7, "Perks", border=1, align="R")
+        pdf.cell(25, 7, "Fee", border=1, align="R")
+        pdf.ln()
+        pdf.set_font("Helvetica", "", 9)
+        for card in icono_scores[:10]:
+            pdf.cell(60, 7, _sanitize(card["name"][:28]), border=1)
+            pdf.cell(30, 7, f"${card['icono_ongoing']:,.0f}", border=1, align="R")
+            pdf.cell(30, 7, f"${card['icono_year1']:,.0f}", border=1, align="R")
+            pdf.cell(25, 7, f"${card['perks_value']:,.0f}", border=1, align="R")
+            pdf.cell(25, 7, f"${card['annual_fee']:,.0f}", border=1, align="R")
+            pdf.ln()
+        pdf.ln(4)
 
     # Card Breakdown
     breakdown = summary.get("card_breakdown", {})

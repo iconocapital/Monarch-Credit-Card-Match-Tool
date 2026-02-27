@@ -5,6 +5,8 @@ Extracted from reward_optimizer.py to enable clean imports across
 the Streamlit UI, FastAPI backend, and test suite.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 
@@ -17,7 +19,6 @@ class CardProfile:
     categories: dict = field(default_factory=dict)
     base_rate: float = 0.01  # 1% default
     cpp_valuation: float = 1.0  # cents-per-point (1.0 = cash, 2.0 = UR, etc.)
-    annual_credits: float = 0.0  # Legacy: raw face-value total (display only)
     signup_bonus_value: float = 0.0  # SUB dollar value for acquisition planning
 
     # Icono perk fields — granular credit buckets (all in face-value dollars)
@@ -27,6 +28,70 @@ class CardProfile:
     dining_credit: float = 0.0
     streaming_credit: float = 0.0
     other_credit: float = 0.0
+
+    # DEPRECATED — display only.  Use the granular *_credit fields above.
+    # Not consumed by icono_engine scoring; kept for backwards-compatible display.
+    annual_credits: float = 0.0
+
+
+# ─────────────────────────────────────────────
+#  CPP Mode Utility
+# ─────────────────────────────────────────────
+
+# Conservative floor CPP values — use when cpp_mode == "floor"
+CPP_FLOOR_MAP: dict[str, float] = {
+    "Ultimate Rewards": 1.5,
+    "Membership Rewards": 0.9,
+    "ThankYou Points": 1.5,
+    "Capital One Miles": 1.0,
+    "Bilt Points": 2.2,
+    "Wells Fargo Points": 1.0,
+    "Marriott Bonvoy": 0.7,
+    "Cash Back": 1.0,
+    "Cash Back (Daily Cash)": 1.0,
+}
+
+
+def get_effective_cpp(card: CardProfile, mode: str = "awardwallet") -> float:
+    """Return the cents-per-point value for *card* under the chosen mode.
+
+    Parameters
+    ----------
+    card : CardProfile to evaluate.
+    mode : ``"awardwallet"`` returns ``card.cpp_valuation`` (optimistic, live).
+           ``"floor"`` returns conservative redemption values per currency.
+
+    Returns
+    -------
+    float — effective cpp multiplier.
+    """
+    if mode == "floor":
+        return CPP_FLOOR_MAP.get(card.currency, 1.0)
+    return card.cpp_valuation
+
+
+# ─────────────────────────────────────────────
+#  AwardWallet Integration Stub
+# ─────────────────────────────────────────────
+
+def refresh_cpp_from_awardwallet(cards: dict[str, CardProfile]) -> dict[str, float]:
+    """Placeholder for AwardWallet API integration.
+
+    When wired up, this will call the AwardWallet ``/api/cc`` endpoint,
+    fetch live cpp valuations and category earn-rate updates, and return
+    a dict mapping card name → updated cpp.
+
+    Currently returns each card's existing ``cpp_valuation`` unchanged.
+    """
+    # TODO: implement actual AwardWallet call:
+    #   import requests, os
+    #   resp = requests.get(
+    #       "https://awardwallet.com/api/cc",
+    #       headers={"Authorization": f"Bearer {os.getenv('AWARDWALLET_API_KEY')}"},
+    #   )
+    #   data = resp.json()
+    #   ... map response to cards ...
+    return {name: card.cpp_valuation for name, card in cards.items()}
 
 
 # ─────────────────────────────────────────────
@@ -159,16 +224,48 @@ CARD_DB: dict[str, CardProfile] = {
         base_rate=0.0125,
         cpp_valuation=2.04,
     ),
-    "Bilt Mastercard": CardProfile(
-        name="Bilt Mastercard",
+
+    # ═══ BILT 2.0 LINEUP (Feb 2026) ═══
+    # Bilt 2.0 dual-currency: Bilt Points (transferable to Atmos/Hyatt) + Bilt Cash.
+    # Housing multiplier: up to 1.25x based on everyday spend ratio (tiered).
+    # Bilt Cash: 4% on non-housing, redeemable at $30 per 1,000 Bilt Points on housing.
+    # CPP: 2.2 (Atmos Rewards / World of Hyatt trifecta valuation).
+    "Bilt Blue": CardProfile(
+        name="Bilt Blue",
         annual_fee=0,
         currency="Bilt Points",
         base_rate=0.01,
-        cpp_valuation=2.0,
+        cpp_valuation=2.2,
         categories={
-            "housing": 0.0125,
+            "housing": 0.0125,  # max tiered housing rate
+        },
+    ),
+    "Bilt Obsidian": CardProfile(
+        name="Bilt Obsidian",
+        annual_fee=95,
+        currency="Bilt Points",
+        base_rate=0.01,
+        cpp_valuation=2.2,
+        annual_credits=100,
+        signup_bonus_value=0,
+        hotel_credit=100,
+        categories={
+            "housing": 0.0125,  # max tiered housing rate
             "dining": 0.03,
-            "travel": 0.02,
+            "groceries": 0.03,
+        },
+    ),
+    "Bilt Palladium": CardProfile(
+        name="Bilt Palladium",
+        annual_fee=495,
+        currency="Bilt Points",
+        base_rate=0.02,  # 2x on everything
+        cpp_valuation=2.2,
+        annual_credits=400,
+        signup_bonus_value=0,
+        hotel_credit=400,
+        categories={
+            "housing": 0.0125,  # max tiered housing rate
         },
     ),
 
@@ -273,7 +370,7 @@ CARD_DB: dict[str, CardProfile] = {
         },
     ),
 
-    # ═══ STORE / CO-BRAND ═══
+    # ═══ STORE / BRAND-SPECIFIC ═══
     "Amazon Prime Visa": CardProfile(
         name="Amazon Prime Visa",
         annual_fee=0,
@@ -298,6 +395,17 @@ CARD_DB: dict[str, CardProfile] = {
             "apple_pay": 0.02,
         },
     ),
+    "Target Circle Card": CardProfile(
+        name="Target Circle Card",
+        annual_fee=0,
+        currency="Cash Back",
+        base_rate=0.01,
+        categories={
+            "target": 0.05,
+        },
+    ),
+
+    # ═══ CO-BRAND TRAVEL ═══
     "Chase Marriott Bonvoy Boundless": CardProfile(
         name="Chase Marriott Bonvoy Boundless",
         annual_fee=95,
@@ -310,16 +418,6 @@ CARD_DB: dict[str, CardProfile] = {
         categories={
             "hotels": 0.06,
         },
-    ),
-
-    # ═══ BUSINESS ═══
-    "Blue Business Plus": CardProfile(
-        name="Blue Business Plus",
-        annual_fee=0,
-        currency="Membership Rewards",
-        base_rate=0.02,
-        cpp_valuation=1.99,
-        signup_bonus_value=298.5,
     ),
 
     # ═══ BANK OF AMERICA ═══
@@ -415,19 +513,6 @@ CARD_DB: dict[str, CardProfile] = {
             "utilities": 0.05,
             "internet": 0.05,
             "phone": 0.05,
-        },
-    ),
-
-    # ═══ STATE FARM ═══
-    "State Farm Premier Cash Rewards": CardProfile(
-        name="State Farm Premier Cash Rewards",
-        annual_fee=0,
-        currency="Cash Back",
-        base_rate=0.015,
-        cpp_valuation=1.0,
-        signup_bonus_value=0,
-        categories={
-            "insurance": 0.03,
         },
     ),
 
