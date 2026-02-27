@@ -47,8 +47,16 @@ class CardProfile:
     categories: dict = field(default_factory=dict)
     base_rate: float = 0.01  # 1% default
     cpp_valuation: float = 1.0  # cents-per-point (1.0 = cash, 2.29 = ThankYou, 2.04 = C1 Miles, etc.)
-    annual_credits: float = 0.0  # Annual statement/travel credits that offset fee
+    annual_credits: float = 0.0  # Legacy: raw face-value total (kept for display only)
     signup_bonus_value: float = 0.0  # SUB dollar value for acquisition planning
+
+    # Icono perk fields — granular credit buckets (all in face-value dollars)
+    hotel_credit: float = 0.0
+    travel_credit: float = 0.0
+    uber_credit: float = 0.0
+    dining_credit: float = 0.0
+    streaming_credit: float = 0.0
+    other_credit: float = 0.0
 
 
 # ─────────────────────────────────────────────
@@ -94,8 +102,13 @@ CARD_DB: dict[str, CardProfile] = {
         currency="Membership Rewards",
         base_rate=0.01,
         cpp_valuation=1.99,  # MR points ~1.99 cpp via transfer partners
-        annual_credits=200,  # airline fee + digital entertainment + Uber + more
+        annual_credits=840,  # face-value total of usable credits below
         signup_bonus_value=3000,
+        # Icono perk breakdown (Equinox $300, Clear $199, Walmart+ $155 zeroed — niche)
+        travel_credit=200,      # airline incidental credit
+        uber_credit=200,        # Uber Cash
+        streaming_credit=240,   # digital entertainment (Disney+, NYT, etc.)
+        hotel_credit=200,       # FHR / Hotel Collection credit
         categories={
             "airlines": 0.05,   # booked via Amex Travel
             "hotels": 0.05,     # booked via Amex Travel
@@ -109,6 +122,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=2.0,  # UR points ~2.0 cpp via transfer partners
         annual_credits=300,  # $300 travel credit
         signup_bonus_value=1200,
+        travel_credit=300,      # $300 travel credit (widely used, full weight)
         categories={
             "dining": 0.03,
             "travel": 0.03,
@@ -123,8 +137,10 @@ CARD_DB: dict[str, CardProfile] = {
         currency="Capital One Miles",
         base_rate=0.02,
         cpp_valuation=2.04,  # C1 miles ~2.04 cpp via transfer partners
-        annual_credits=400,  # $300 travel + $100 lifestyle
+        annual_credits=400,  # $300 travel + $100 anniversary miles
         signup_bonus_value=1530,
+        travel_credit=300,      # $300 travel portal credit
+        other_credit=100,       # 10k anniversary miles ≈ $100
         categories={
             "hotels": 0.10,  # booked via Capital One Travel
             "car_rental": 0.10,  # booked via Capital One Travel
@@ -140,6 +156,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=2.0,
         annual_credits=50,  # $50 hotel credit via Chase Travel
         signup_bonus_value=1200,
+        hotel_credit=50,        # $50 hotel credit via Chase Travel portal
         categories={
             "dining": 0.03,
             "travel": 0.02,
@@ -157,6 +174,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=2.04,  # C1 miles ~2.04 cpp via transfer partners
         annual_credits=100,
         signup_bonus_value=1530,
+        travel_credit=100,      # travel portal credit
         categories={
             "hotels": 0.05,  # booked via Capital One Travel
         },
@@ -169,6 +187,8 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=1.99,  # MR points ~1.99 cpp via transfer partners
         annual_credits=424,  # $120 dining + $120 Uber + $84 Dunkin + $100 hotel
         signup_bonus_value=1990,
+        dining_credit=304,      # $120 dining + $84 Dunkin + $100 Resy/hotel dining
+        uber_credit=120,        # $120 Uber Cash
         categories={
             "dining": 0.04,
             "groceries": 0.04,  # US supermarkets
@@ -182,6 +202,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=2.29,  # TY points ~2.29 cpp via transfer partners
         annual_credits=100,
         signup_bonus_value=1374,
+        hotel_credit=100,       # $100 hotel credit via ThankYou portal
         categories={
             "hotels": 0.03,
             "airlines": 0.03,
@@ -250,6 +271,7 @@ CARD_DB: dict[str, CardProfile] = {
         currency="Cash Back",
         annual_credits=120,
         signup_bonus_value=300,
+        streaming_credit=120,   # streaming/subscription credits
         categories={
             "groceries": 0.06,   # up to $6k/yr at US supermarkets
             "streaming": 0.06,
@@ -347,6 +369,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=0.7,  # Marriott points ~0.7 cpp
         annual_credits=100,  # free night cert (up to 50k pts value)
         signup_bonus_value=525,
+        hotel_credit=100,       # free night certificate ≈ $100
         categories={
             "hotels": 0.06,  # 6x at Marriott properties
         },
@@ -371,6 +394,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=1.0,
         annual_credits=150,
         signup_bonus_value=800,
+        travel_credit=150,      # travel-related credit
         categories={
             "dining": 0.04,
             "travel": 0.03,
@@ -386,6 +410,7 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=1.0,
         annual_credits=100,
         signup_bonus_value=600,
+        travel_credit=100,      # travel-related credit
         categories={
             "dining": 0.03,
             "travel": 0.02,
@@ -401,6 +426,8 @@ CARD_DB: dict[str, CardProfile] = {
         cpp_valuation=1.0,
         annual_credits=200,  # $100 airline incidental + $100 travel/dining
         signup_bonus_value=600,
+        travel_credit=100,      # $100 airline incidental credit
+        dining_credit=100,      # $100 travel/dining credit
         categories={
             "dining": 0.02,
             "travel": 0.02,
@@ -483,6 +510,52 @@ CARD_DB: dict[str, CardProfile] = {
         },
     ),
 }
+
+
+# ─────────────────────────────────────────────
+#  Icono Perk Valuation (Weighted Haircuts)
+# ─────────────────────────────────────────────
+# Iconoclastic Capital applies probability-of-use and difficulty weights
+# to each perk category instead of using raw face-value credits.
+# Niche perks (Equinox, Clear, Walmart+, Lulu) are excluded entirely
+# by not mapping them in the card profiles above.
+
+ICONO_WEIGHTS = {
+    "travel": 1.0,              # travel credits are widely usable → full value
+    "uber": 0.7,                # Uber Cash — useful but not everyone's preference
+    "dining": 0.7,              # dining credits (Grubhub, Resy, Dunkin) — decent utility
+    "streaming": 0.5,           # streaming/entertainment — may not use all subscriptions
+    "other": 0.7,               # anniversary miles, misc. — generally useful
+    "hotel_util": 0.7,          # probability of actually using hotel credits
+    "hotel_difficulty": 0.5,    # difficulty factor: hotel credits often require portal booking
+}
+
+
+def icono_perk_value(card: CardProfile) -> float:
+    """Iconoclastic-adjusted annual perks value (dollars).
+
+    Applies differentiated weights to each perk bucket instead of
+    counting raw face-value credits. Hotel credits are double-discounted
+    (utilization × difficulty). Niche perks excluded at the profile level.
+    """
+    w = ICONO_WEIGHTS
+    hotel_val = card.hotel_credit * w["hotel_util"] * w["hotel_difficulty"]
+    travel_val = card.travel_credit * w["travel"]
+    uber_val = card.uber_credit * w["uber"]
+    dining_val = card.dining_credit * w["dining"]
+    streaming_val = card.streaming_credit * w["streaming"]
+    other_val = card.other_credit * w["other"]
+    return hotel_val + travel_val + uber_val + dining_val + streaming_val + other_val
+
+
+def icono_score_ongoing(card: CardProfile, annual_rewards: float) -> float:
+    """Ongoing Icono score: real annual rewards + haircut perks - fee."""
+    return annual_rewards + icono_perk_value(card) - card.annual_fee
+
+
+def icono_score_year1(card: CardProfile, annual_rewards: float) -> float:
+    """Year 1 Icono score: ongoing value + sign-up bonus."""
+    return annual_rewards + card.signup_bonus_value + icono_perk_value(card) - card.annual_fee
 
 
 # ─────────────────────────────────────────────
@@ -1208,23 +1281,42 @@ class RewardOptimizer:
         else:
             totals["blended_rate_pct"] = 0.0
 
-        # Annual fee ROI — use effective fee (fee minus annual credits)
+        # Annual fee ROI — Icono weighted perk values instead of raw credits
         total_gross_fees = sum(
             self.cards[name].annual_fee
             for name in totals["card_breakdown"]
             if name in self.cards
         )
-        total_credits = sum(
+        total_raw_credits = sum(
             self.cards[name].annual_credits
             for name in totals["card_breakdown"]
             if name in self.cards
         )
-        totals["total_annual_fees"] = total_gross_fees
-        totals["total_annual_credits"] = total_credits
-        totals["effective_annual_fees"] = total_gross_fees - total_credits
-        totals["net_rewards_after_fees"] = round(
-            totals["total_rewards"] - (total_gross_fees - total_credits), 2
+        total_icono_perks = sum(
+            icono_perk_value(self.cards[name])
+            for name in totals["card_breakdown"]
+            if name in self.cards
         )
+        totals["total_annual_fees"] = total_gross_fees
+        totals["total_annual_credits"] = total_raw_credits
+        totals["total_icono_perks"] = round(total_icono_perks, 2)
+        totals["effective_annual_fees"] = round(total_gross_fees - total_icono_perks, 2)
+        totals["net_rewards_after_fees"] = round(
+            totals["total_rewards"] - (total_gross_fees - total_icono_perks), 2
+        )
+
+        # Per-card Icono scores
+        icono_card_scores = {}
+        for name, data in totals["card_breakdown"].items():
+            if name in self.cards:
+                profile = self.cards[name]
+                annual_rewards = data["rewards"] * 12
+                icono_card_scores[name] = {
+                    "icono_perks": round(icono_perk_value(profile), 2),
+                    "icono_ongoing": round(icono_score_ongoing(profile, annual_rewards), 2),
+                    "icono_year1": round(icono_score_year1(profile, annual_rewards), 2),
+                }
+        totals["icono_card_scores"] = icono_card_scores
 
         return results_df, totals
 
@@ -1431,17 +1523,14 @@ class CardAcquisitionPlanner:
             monthly_rewards = data["rewards"]
             annual_rewards = monthly_rewards * 12
             annual_fee = profile.annual_fee
-            annual_credits = profile.annual_credits
-            effective_fee = annual_fee - annual_credits
-            net_year1 = annual_rewards - effective_fee
             spend = data["spend"]
 
             # Use signup_bonus_value from CardProfile (accurate dollar amount)
             sub_value = profile.signup_bonus_value
             sub_text = SIGNUP_BONUSES.get(card_name, "Unknown")
 
-            # Year-1 total value = SUB + ongoing rewards - effective fee
-            year1_value = sub_value + net_year1
+            # Year-1 total value using Icono weighted perk haircuts
+            year1_value = icono_score_year1(profile, annual_rewards)
 
             # Build category list this card unlocks
             cats_unlocked = []
